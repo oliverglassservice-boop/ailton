@@ -1,8 +1,9 @@
 /**
- * NEON CRM — servidor da Fase 1 (v9).
+ * NEON CRM — servidor da Fase 1 (v10).
  * Núcleo: contatos, deals, inbox WhatsApp (Uazapi), AI Gateway (OpenAI).
  * AUTO_RESPOND=true no Environment → a IA responde leads sozinha.
  * v9: dedupe de eventos do webhook + logs de diagnóstico do auto-respond.
+ * v10: rota /api/debug/env para verificar variáveis sem entrar no EasyPanel.
  */
 import express from 'express';
 import path from 'path';
@@ -20,6 +21,16 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /* ---------------- API: saúde ---------------- */
 app.get('/api/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
+
+/* ---------------- API: diagnóstico de Environment (v10, sem expor segredos) ---------------- */
+app.get('/api/debug/env', (_req, res) => res.json({
+  auto_respond: process.env.AUTO_RESPOND || null,
+  uazapi_url: process.env.UAZAPI_URL || null,
+  app_url: process.env.APP_URL || null,
+  webhook_secret_definido: !!process.env.WEBHOOK_SECRET,
+  openai_key_definida: !!process.env.OPENAI_API_KEY,
+  uazapi_token_definido: !!process.env.UAZAPI_TOKEN,
+}));
 
 /* ---------------- API: contatos ---------------- */
 app.get('/api/contacts', async (_req, res) => {
@@ -231,7 +242,7 @@ app.use(express.static(path.join(__dirname, '..', 'public')));
 
 const PORT = process.env.PORT || 3000;
 await migrate();
-console.log(`[boot] NEON CRM v9 no ar | AUTO_RESPOND=${process.env.AUTO_RESPOND || '(NÃO definido!)'} | UAZAPI_URL=${process.env.UAZAPI_URL || '(NÃO definido!)'}`);
+console.log(`[boot] NEON CRM v10 no ar | AUTO_RESPOND=${process.env.AUTO_RESPOND || '(NÃO definido!)'} | UAZAPI_URL=${process.env.UAZAPI_URL || '(NÃO definido!)'}`);
 app.listen(PORT, () => console.log(`NEON CRM no ar em ${process.env.APP_URL || 'http://localhost:' + PORT}`));
 
 process.on('SIGTERM', () => { pool.end().then(() => process.exit(0)); });
