@@ -1,17 +1,27 @@
 /**
  * AI GATEWAY — única porta de saída para LLMs.
- * Regras: nunca acesso direto ao banco pelo modelo; só contexto curado.
- * Todo consumo passa por aqui (custo, logs, troca de modelo centralizada).
+ * Cliente OpenAI criado sob demanda (lazy): o app sobe mesmo sem chave,
+ * e a IA reclama educadamente nos logs até a chave ser configurada.
  */
 import OpenAI from 'openai';
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+let client = null;
+function getClient() {
+  if (!client) {
+    if (!process.env.OPENAI_API_KEY) {
+      throw new Error('OPENAI_API_KEY não configurada — preencha no Environment e faça Deploy');
+    }
+    client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  }
+  return client;
+}
+
 const BASE = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 const PREMIUM = process.env.OPENAI_MODEL_PREMIUM || 'gpt-4o';
 const TRANSCRIBE = process.env.OPENAI_TRANSCRIBE_MODEL || 'whisper-1';
 
 async function chat(model, system, user, maxTokens = 500) {
-  const r = await client.chat.completions.create({
+  const r = await getClient().chat.completions.create({
     model,
     max_tokens: maxTokens,
     messages: [
@@ -62,7 +72,7 @@ export async function suggestReply(messages, contactContext = {}) {
 
 /** Transcreve áudio de WhatsApp (buffer ogg/mp3) via Whisper. */
 export async function transcribeAudio(buffer, filename = 'audio.ogg') {
-  const r = await client.audio.transcriptions.create({
+  const r = await getClient().audio.transcriptions.create({
     model: TRANSCRIBE,
     file: await OpenAI.toFile(buffer, filename),
   });
