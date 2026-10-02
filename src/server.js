@@ -1,7 +1,8 @@
 /**
- * NEON CRM — servidor da Fase 1.
+ * NEON CRM — servidor da Fase 1 (v9).
  * Núcleo: contatos, deals, inbox WhatsApp (Uazapi), AI Gateway (OpenAI).
  * AUTO_RESPOND=true no Environment → a IA responde leads sozinha.
+ * v9: dedupe de eventos do webhook + logs de diagnóstico do auto-respond.
  */
 import express from 'express';
 import path from 'path';
@@ -145,6 +146,16 @@ app.post('/webhooks/uazapi', async (req, res) => {
     const msg = uazapi.parseWebhook(req.body);
     if (!msg) return;
     console.log('[webhook]', msg.eventType, msg.chatId, msg.kind);
+
+    // ---- DEDUPE: a Uazapi pode reenviar o mesmo evento (ou há 2 webhooks registrados) ----
+    if (msg.waMessageId) {
+      const dup = await query(`SELECT 1 FROM messages WHERE wa_message_id = $1 LIMIT 1`, [String(msg.waMessageId)]);
+      if (dup.rowCount > 0) {
+        console.log('[webhook] evento duplicado ignorado:', msg.waMessageId);
+        return;
+      }
+    }
+
     const { contact, conversation } = await ensureContactAndConversation(msg.chatId.split('@')[0], msg.senderName);
 
     let body = msg.text;
@@ -180,16 +191,33 @@ app.post('/webhooks/uazapi', async (req, res) => {
 
         // ---- AUTO-RESPOSTA (interruptor: AUTO_RESPOND=true no Environment) ----
         if ((process.env.AUTO_RESPOND || 'false') === 'true') {
-          const sent = await uazapi.sendText(conversation.wa_chat_id, suggestion);
-          await query(
-            `INSERT INTO messages (conversation_id, direction, kind, body, wa_message_id)
-             VALUES ($1,'out','text',$2,$3)`,
-            [conversation.id, suggestion, sent?.id ? String(sent.id) : null]
-          );
-          await query(`UPDATE conversations SET last_msg_at = now() WHERE id = $1`, [conversation.id]);
-          await query(`UPDATE thread_state SET next_suggestion = NULL WHERE conversation_id = $1`,
-            [conversation.id]);
-          console.log('[auto] resposta enviada automaticamente p/ conversa', conversation.id);
+          // proteção anti-duplicidade: não reenvia resposta idêntica em menos de 90s
+          const dupSend = await query(
+            `SELECT 1 FROM messages WHERE conversation_id = $1 AND direction = 'out'
+             AND body = $2 AND created_at > now() - interval '90 seconds' LIMIT 1`,
+            [conversation.id, suggestion]);
+          if (dupSend.rowCount > 0) {
+            console.log('[auto] resposta idêntica enviada há pouco — reenvio ignorado');
+          } else {
+            console.log('[auto] enviando resposta automática p/ conversa', conversation.id);
+            try {
+              const sent = await uazapi.sendText(conversation.wa_chat_id, suggestion);
+              await query(
+                `INSERT INTO messages (conversation_id, direction, kind, body, wa_message_id)
+                 VALUES ($1,'out','text',$2,$3)`,
+                [conversation.id, suggestion, sent?.id ? String(sent.id) : null]
+              );
+              await query(`UPDATE conversations SET last_msg_at = now() WHERE id = $1`, [conversation.id]);
+              await query(`UPDATE thread_state SET next_suggestion = NULL WHERE conversation_id = $1`,
+                [conversation.id]);
+              console.log('[auto] ✅ resposta enviada automaticamente p/ conversa', conversation.id);
+            } catch (sendErr) {
+              console.error('[auto] ❌ FALHA ao enviar via Uazapi:', sendErr.message,
+                '— sugestão mantida p/ envio manual');
+            }
+          }
+        } else {
+          console.log('[auto] AUTO_RESPOND desativado — sugestão aguardando o vendedor');
         }
       } catch (e) { console.error('[ia] falha ao gerar sugestão:', e.message); }
     })();
@@ -203,6 +231,7 @@ app.use(express.static(path.join(__dirname, '..', 'public')));
 
 const PORT = process.env.PORT || 3000;
 await migrate();
+console.log(`[boot] NEON CRM v9 no ar | AUTO_RESPOND=${process.env.AUTO_RESPOND || '(NÃO definido!)'} | UAZAPI_URL=${process.env.UAZAPI_URL || '(NÃO definido!)'}`);
 app.listen(PORT, () => console.log(`NEON CRM no ar em ${process.env.APP_URL || 'http://localhost:' + PORT}`));
 
 process.on('SIGTERM', () => { pool.end().then(() => process.exit(0)); });
