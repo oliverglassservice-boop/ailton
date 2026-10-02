@@ -1,0 +1,17 @@
+{
+  "name": "neon-crm",
+  "version": "0.1.0",
+  "description": "NEON CRM - CRM all-in-one IA-nativo (Fase 1: dados unificados + WhatsApp via Uazapi + AI Gateway OpenAI)",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "openai": "^4.68.0",
+    "pg": "^8.12.0"
+  }
+}

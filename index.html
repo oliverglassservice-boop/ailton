@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NEON CRM — Fase 1</title>
+<style>
+:root{--ink:#14162A;--paper:#F5F4EF;--card:#fff;--line:#E6E3DA;--muted:#6E7186;--ai:#6B4DF6;--ai-soft:#EFEBFF;--ai-deep:#4C33C9;--green:#0B7A5C;--green-soft:#E2F2EC;--amber:#B97A12;--amber-soft:#FBF1DC;--wa:#0B7A5C}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,sans-serif;background:var(--paper);color:#22243A;font-size:14px}
+header{background:var(--ink);color:#fff;padding:14px 24px;display:flex;gap:20px;align-items:center}
+header h1{font-size:17px;font-weight:700;letter-spacing:.05em}
+nav button{background:none;border:none;color:#C9CBDD;font-size:14px;padding:8px 14px;cursor:pointer;border-radius:8px}
+nav button.active{background:#262A52;color:#fff;font-weight:600}
+main{max-width:1200px;margin:0 auto;padding:24px}
+.view{display:none}.view.active{display:block}
+.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 18px}
+.kpi .l{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.kpi .v{font-size:24px;font-weight:700;color:var(--ink);margin-top:4px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.card h2{font-size:14px;padding:14px 18px;border-bottom:1px solid var(--line)}
+.kanban{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.col{background:#EDECE6;border:1px solid var(--line);border-radius:12px;padding:10px;min-height:120px}
+.col b{font-size:12px;display:block;padding:4px 6px 10px;color:var(--ink)}
+.deal{background:#fff;border:1px solid var(--line);border-radius:9px;padding:11px 13px;margin-bottom:8px;width:100%;text-align:left;cursor:pointer;font:inherit}
+.deal:hover{border-color:var(--ai)}
+.deal b{font-size:13px;display:block;color:var(--ink)}
+.deal small{color:var(--muted);display:block;margin:3px 0 7px}
+.deal .v{font-weight:700;font-size:12.5px}
+.deal .p{float:right;font-weight:700;color:var(--ai-deep)}
+table{width:100%;border-collapse:collapse}
+th{font-size:11px;text-transform:uppercase;color:var(--muted);text-align:left;padding:10px 18px;border-bottom:1px solid var(--line)}
+td{padding:11px 18px;border-bottom:1px solid #EFEDE6;font-size:13px}
+.grid2{display:grid;grid-template-columns:300px 1fr;gap:14px;align-items:start}
+.thread{display:block;width:100%;text-align:left;padding:12px 14px;border:none;border-bottom:1px solid #EFEDE6;background:none;cursor:pointer;font:inherit}
+.thread:hover{background:#FAF9F4}.thread.active{background:var(--ai-soft)}
+.thread b{font-size:13px}.thread small{display:block;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chat{display:flex;flex-direction:column;height:70vh}
+.chat-h{padding:12px 18px;border-bottom:1px solid var(--line);background:#fff}
+.chat-h b{font-size:14px}.chat-h small{color:var(--muted);display:block}
+.chat-b{flex:1;overflow-y:auto;padding:18px;background:#EFEAE3;display:flex;flex-direction:column;gap:8px}
+.msg{max-width:65%;padding:8px 12px;border-radius:10px;font-size:13.5px;box-shadow:0 1px 1px rgba(0,0,0,.05)}
+.msg.in{background:#fff;align-self:flex-start}
+.msg.out{background:#D9F2E4;align-self:flex-end}
+.msg.audio{color:var(--amber);font-style:italic}
+.ai-box{margin:0 0 4px;background:var(--ai-soft);border:1px solid #DDD4FB;border-radius:10px;padding:10px 14px;font-size:13px;color:#3D2E8F;align-self:stretch}
+.ai-box b{display:block;font-size:10px;text-transform:uppercase;color:var(--ai-deep);margin-bottom:2px}
+.chat-f{padding:12px 14px;border-top:1px solid var(--line);background:#fff}
+.sugg{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.sugg button{background:var(--ai-soft);border:1px solid #DDD4FB;color:var(--ai-deep);font-size:12px;padding:6px 11px;border-radius:18px;cursor:pointer;font-weight:600}
+.row{display:flex;gap:8px}
+.row input{flex:1;border:1px solid var(--line);border-radius:22px;padding:10px 15px;font-size:13.5px;outline:none;background:#F3F1EB}
+.row button{width:40px;height:40px;border-radius:50%;background:var(--wa);color:#fff;border:none;cursor:pointer;font-size:16px}
+.btn{border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer;font-weight:600}
+.btn-ai{background:var(--ai);border-color:var(--ai);color:#fff}
+summary{cursor:pointer}
+pre{white-space:pre-wrap;font-family:inherit;font-size:13px;line-height:1.5}
+@media(max-width:800px){.kanban{grid-template-columns:1fr}.grid2{grid-template-columns:1fr}.kpis{grid-template-columns:1fr}.msg{max-width:85%}}
+</style>
+</head>
+<body>
+<header>
+  <h1>◆ NEON CRM</h1>
+  <nav>
+    <button data-v="funil" class="active">Funil</button>
+    <button data-v="contatos">Contatos</button>
+    <button data-v="wa">WhatsApp</button>
+  </nav>
+  <span style="margin-left:auto;font-size:12px;color:#8B8FAF" id="health"></span>
+</header>
+<main>
+  <section class="view active" id="v-funil">
+    <div class="kpis">
+      <div class="kpi"><div class="l">Negócios abertos</div><div class="v" id="k-deals">–</div></div>
+      <div class="kpi"><div class="l">Pipeline total</div><div class="v" id="k-pipe">–</div></div>
+      <div class="kpi"><div class="l">Pipeline ponderado (IA)</div><div class="v" id="k-weighted">–</div></div>
+    </div>
+    <div class="kanban" id="kanban"></div>
+  </section>
+  <section class="view" id="v-contatos">
+    <div class="card"><h2>Contatos</h2><table>
+      <thead><tr><th>Nome</th><th>Empresa</th><th>Score IA</th><th>WhatsApp</th><th>Status</th></tr></thead>
+      <tbody id="contactsBody"></tbody></table></div>
+  </section>
+  <section class="view" id="v-wa">
+    <div class="grid2">
+      <div class="card" id="threadList" style="max-height:70vh;overflow-y:auto"></div>
+      <div class="card chat" id="chatPane" style="display:none">
+        <div class="chat-h"><b id="chatName"></b><small id="chatMeta"></small></div>
+        <div class="chat-b" id="chatBody"></div>
+        <div class="chat-f">
+          <div class="sugg" id="suggRow"></div>
+          <div class="row">
+            <input id="msgInput" placeholder="Digite a mensagem…">
+            <button id="sendBtn">➤</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+const fmt = c => 'R$ ' + (c/100).toLocaleString('pt-BR');
+const STAGES = {novo:'Novo lead', qualificacao:'Qualificação', proposta:'Proposta', fechamento:'Fechamento'};
+let curThread = null;
+
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('nav button, .view').forEach(x => x.classList.remove('active'));
+  b.classList.add('active'); $('#v-'+b.dataset.v).classList.add('active');
+});
+
+async function j(url, opt) { const r = await fetch(url, opt && {method:opt.method||'POST',headers:{'Content-Type':'application/json'},body:opt.body?JSON.stringify(opt.body):undefined}); return r.json(); }
+
+async function loadFunil(){
+  const deals = await j('/api/deals',{method:'GET'});
+  const open = deals.filter(d=>!['ganho','perdido'].includes(d.stage));
+  $('#k-deals').textContent = open.length;
+  $('#k-pipe').textContent = fmt(open.reduce((s,d)=>s+Number(d.value_cents||0),0));
+  $('#k-weighted').textContent = fmt(open.reduce((s,d)=>s+Number(d.value_cents||0)*(d.probability||0)/100,0));
+  const kb = $('#kanban'); kb.innerHTML='';
+  for (const st of Object.keys(STAGES)){
+    const col = document.createElement('div'); col.className='col';
+    col.innerHTML = `<b>${STAGES[st]} · ${open.filter(d=>d.stage===st).length}</b>`;
+    open.filter(d=>d.stage===st).forEach(d=>{
+      const el = document.createElement('button'); el.className='deal';
+      el.innerHTML = `<span class="p">${d.probability||0}%</span><b>${d.title}</b><small>${d.contact_name||''} · ${d.company||''}</small><span class="v">${fmt(d.value_cents)}</span>`;
+      el.onclick = async () => {
+        const next = Object.keys(STAGES)[(Object.keys(STAGES).indexOf(d.stage)+1) % Object.keys(STAGES).length];
+        if (confirm(`Mover "${d.title}" para ${STAGES[next]}?`)) { await j(`/api/deals/${d.id}`,{body:{stage:next}}); loadFunil(); }
+      };
+      col.appendChild(el);
+    });
+    kb.appendChild(col);
+  }
+}
+
+async function loadContatos(){
+  const cs = await j('/api/contacts',{method:'GET'});
+  $('#contactsBody').innerHTML = cs.map(c=>`<tr><td><b>${c.name}</b></td><td>${c.company||''}</td>
+    <td><span style="color:${c.score>=70?'var(--green)':c.score>=45?'var(--amber)':'#C2453A'};font-weight:700">${c.score}</span></td>
+    <td>${c.wa_id||'—'}</td><td>${c.status}</td></tr>`).join('');
+}
+
+async function loadThreads(){
+  const ts = await j('/api/threads',{method:'GET'});
+  const box = $('#threadList'); box.innerHTML='<h2>Conversas</h2>';
+  ts.forEach(t=>{
+    const b = document.createElement('button'); b.className='thread'+(t.id===curThread?' active':'');
+    b.innerHTML = `<b>${t.name}</b> <span style="color:var(--ai-deep);font-weight:700">· ${t.score}</span>
+      ${t.unread?`<span style="float:right;background:var(--wa);color:#fff;border-radius:9px;padding:0 7px;font-size:11px;font-weight:700">${t.unread}</span>`:''}
+      <small>${(t.last_body||'sem mensagens').slice(0,60)}</small>`;
+    b.onclick = () => openThread(t.id, t);
+    box.appendChild(b);
+  });
+}
+
+async function openThread(id, t){
+  curThread = id;
+  $('#chatPane').style.display='flex';
+  $('#chatName').textContent = t.name;
+  $('#chatMeta').textContent = `${t.company||''} · score ${t.score} · ${t.tone||'tom: —'}`;
+  $('#suggRow').innerHTML = '';
+  const msgs = await j(`/api/threads/${id}/messages`,{method:'GET'});
+  const cb = $('#chatBody'); cb.innerHTML='';
+  if (t.summary){ const d=document.createElement('div'); d.className='ai-box'; d.innerHTML=`<b>Resumo IA (turno)</b><pre>${t.summary}</pre>`; cb.appendChild(d); }
+  if (t.next_suggestion){ addSugg(t.next_suggestion, t.suggestion_reason); }
+  msgs.forEach(m=>{
+    const d=document.createElement('div'); d.className='msg '+m.direction+(m.kind==='audio'?' audio':'');
+    d.textContent = (m.kind==='audio'?'🎤 ':'')+m.body; cb.appendChild(d);
+  });
+  cb.scrollTop = cb.scrollHeight;
+  loadThreads();
+}
+
+function addSugg(text, reason){
+  const row = $('#suggRow'); row.innerHTML='';
+  const b = document.createElement('button'); b.textContent = '✨ ' + text.slice(0,60);
+  b.onclick = () => { $('#msgInput').value = text; $('#msgInput').focus(); };
+  row.appendChild(b);
+  if (reason){ const s=document.createElement('small'); s.style.color='var(--muted)'; s.textContent=reason; row.appendChild(s); }
+}
+
+$('#sendBtn').onclick = async () => {
+  const text = $('#msgInput').value.trim(); if(!text||!curThread) return;
+  $('#msgInput').value='';
+  await j('/api/messages/send',{body:{conversation_id:curThread, text}});
+  const t = (await j('/api/threads',{method:'GET'})).find(x=>x.id===curThread);
+  openThread(curThread, t);
+};
+$('#msgInput').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#sendBtn').click(); });
+
+// polling leve: novas sugestões de IA + threads
+setInterval(async ()=>{ loadThreads(); if(curThread){ const t=(await j('/api/threads',{method:'GET'})).find(x=>x.id===curThread); if(t&&t.next_suggestion) addSugg(t.next_suggestion,t.suggestion_reason);} }, 8000);
+
+(async ()=>{ await Promise.all([loadFunil(), loadContatos(), loadThreads()]); const h=await j('/api/health',{method:'GET'}); $('#health').textContent = h.ok ? '● conectado' : '● offline'; })();
+</script>
+</body>
+</html>

@@ -1,0 +1,47 @@
+# NEON CRM — Fase 1 (app + PostgreSQL)
+# Deploy no EasyPanel: crie um projeto "neon-crm" e suba este compose
+# (ou use Services -> App apontando para este repositório).
+#
+# Domínio de produção: crm.oliverglassservice.com
+# Configure no EasyPanel: Domains -> Add -> crm.oliverglassservice.com (SSL automático)
+
+services:
+  neon-app:
+    build: .
+    container_name: neon-crm-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file: .env
+    environment:
+      # sobrescreve o host do banco para o DNS interno do compose
+      DATABASE_URL: postgres://neon:${DB_PASSWORD:-neon_senha_forte}@neon-db:5432/neon
+      NODE_ENV: production
+    depends_on:
+      neon-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  neon-db:
+    image: pgvector/pgvector:pg16   # PostgreSQL 16 + pgvector (embeddings p/ IA)
+    container_name: neon-crm-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: neon
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-neon_senha_forte}
+      POSTGRES_DB: neon
+    volumes:
+      - neon_pgdata:/var/lib/postgresql/data
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U neon"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  neon_pgdata:
