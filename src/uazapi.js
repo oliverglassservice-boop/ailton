@@ -1,9 +1,7 @@
 /**
  * ADAPTADOR UAZAPI — camada de conector trocável.
- * Para trocar por Evolution API ou Cloud API (Meta) no futuro,
- * implemente as MESMAS funções exportadas aqui. Nada mais muda.
- *
- * Contrato oficial: https://docs.uazapi.com/ (OpenAPI em /openapi-bundled.json)
+ * Formato real do webhook (docs.uazapi.com/reference/webhooks/messages.md):
+ * { EventType, owner, token, BaseUrl, instanceName, message: { chatid, sender, senderName, fromMe, messageType, text, id } }
  */
 const BASE = (process.env.UAZAPI_BASE_URL || process.env.UAZAPI_URL || '').replace(/\/$/, '');
 const TOKEN = process.env.UAZAPI_TOKEN;
@@ -32,44 +30,30 @@ export async function sendText(number, text) {
   return res.json();
 }
 
-/**
- * Normaliza o payload do webhook (EventType + data) para o formato interno.
- * Se não reconhecer, devolve o payload bruto para o log diagnosticar.
- */
+/** Normaliza o payload REAL da Uazapi para o formato interno do CRM. */
 export function parseWebhook(body) {
   const type = body?.EventType || body?.event || '';
-  const d = body?.data || body;
-  const key = d?.key || {};
-  const msg = d?.message || {};
-  const chatId = key.remoteJid || d?.chatid || d?.chatId || d?.remoteJid;
-  const isMessage =
-    /message/i.test(type) ||
-    !!key.remoteJid ||
-    !!d?.chatid ||
-    !!d?.chatId ||
-    !!d?.remoteJid;
+  const m = body?.message || {};
 
-  if (!chatId || chatId.includes('@g.us')) {
-    // devolve marcador especial: payload de outro evento (connection, presence...)
-    return { skip: true, raw: body };
+  const chatId = m.chatid || m.chatId || m.sender || null;
+  if (!chatId || m.isGroup === true || String(chatId).includes('@g.us')) {
+    return null;
   }
 
-  const fromMe = key.fromMe ?? d?.fromMe ?? false;
-  const audio = msg.audioMessage || msg.pttMessage || d?.messageType === 'audio';
-  const text =
-    msg.conversation ||
-    msg.extendedTextMessage?.text ||
-    msg.imageMessage?.caption ||
-    d?.text || '';
+  const fromMe = m.fromMe === true || m.wasSentByApi === true;
+  const kind = (m.messageType === 'audio' || m.messageType === 'ptt') ? 'audio'
+    : (m.messageType === 'image' || m.messageType === 'document') ? m.messageType
+    : 'text';
+  const text = m.text || m.content || '';
 
   return {
     eventType: type,
     chatId,
     fromMe,
-    senderName: d?.pushName || d?.sender?.pushname || '',
-    kind: audio ? 'audio' : text ? 'text' : 'other',
+    senderName: m.senderName || '',
+    kind,
     text,
-    waMessageId: key.id || d?.id || '',
+    waMessageId: m.messageid || m.id || '',
     raw: body,
   };
 }
