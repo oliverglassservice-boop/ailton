@@ -1,6 +1,7 @@
 /**
  * NEON CRM — servidor da Fase 1.
  * Núcleo: contatos, deals, inbox WhatsApp (Uazapi), AI Gateway (OpenAI).
+ * AUTO_RESPOND=true no Environment → a IA responde leads sozinha.
  */
 import express from 'express';
 import path from 'path';
@@ -13,7 +14,7 @@ process.on('unhandledRejection', (e) => console.error('[unhandledRejection]', e?
 process.on('uncaughtException', (e) => console.error('[uncaughtException]', e?.message || e));
 
 const app = express();
-app.use(express.json({ limit: '12mb' })); // webhooks com mídia/base64 podem ser grandes
+app.use(express.json({ limit: '12mb' }));
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /* ---------------- API: saúde ---------------- */
@@ -148,9 +149,7 @@ app.post('/webhooks/uazapi', async (req, res) => {
 
     let body = msg.text;
     if (msg.kind === 'audio' && !body) {
-      // Fase 1: guarda o kind=audio; transcrição entra quando configurarmos o download
-      // de mídia (POST /message/download) — a função ai.transcribeAudio já está pronta.
-      body = '[áudio recebido]';
+      body = '[áudio recebido]'; // transcrição completa: ai.transcribeAudio já pronta (Fase 2)
     }
     await query(
       `INSERT INTO messages (conversation_id, direction, kind, body, wa_message_id, raw)
@@ -164,7 +163,7 @@ app.post('/webhooks/uazapi', async (req, res) => {
 
     if (msg.fromMe || msg.kind !== 'text') return;
 
-    // ---- IA em background: intenção + sugestão pronta para o vendedor ----
+    // ---- IA em background: intenção + sugestão (+ auto-resposta opcional) ----
     (async () => {
       try {
         const intent = await ai.classifyIntent(msg.text);
@@ -178,6 +177,20 @@ app.post('/webhooks/uazapi', async (req, res) => {
           `UPDATE thread_state SET next_suggestion = $2, updated_at = now() WHERE conversation_id = $1`,
           [conversation.id, suggestion]);
         console.log('[ia] sugestão pronta p/ conversa', conversation.id);
+
+        // ---- AUTO-RESPOSTA (interruptor: AUTO_RESPOND=true no Environment) ----
+        if ((process.env.AUTO_RESPOND || 'false') === 'true') {
+          const sent = await uazapi.sendText(conversation.wa_chat_id, suggestion);
+          await query(
+            `INSERT INTO messages (conversation_id, direction, kind, body, wa_message_id)
+             VALUES ($1,'out','text',$2,$3)`,
+            [conversation.id, suggestion, sent?.id ? String(sent.id) : null]
+          );
+          await query(`UPDATE conversations SET last_msg_at = now() WHERE id = $1`, [conversation.id]);
+          await query(`UPDATE thread_state SET next_suggestion = NULL WHERE conversation_id = $1`,
+            [conversation.id]);
+          console.log('[auto] resposta enviada automaticamente p/ conversa', conversation.id);
+        }
       } catch (e) { console.error('[ia] falha ao gerar sugestão:', e.message); }
     })();
   } catch (e) {
