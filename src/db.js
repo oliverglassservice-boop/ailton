@@ -11,9 +11,8 @@ const pool = new pg.Pool({
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /**
- * Migração automática no boot: aplica db/schema.sql (idempotente —
- * CREATE TABLE IF NOT EXISTS), funcionando tanto em docker-compose
- * quanto em deploy "App único" no EasyPanel.
+ * Migração automática no boot: aplica db/schema.sql (idempotente).
+ * Fallback: se o banco não tiver pgvector, reaplica sem o bloco de embeddings.
  */
 export async function migrate() {
   try {
@@ -22,11 +21,12 @@ export async function migrate() {
     try {
       await pool.query(sql);
     } catch (e1) {
-      // fallback: sem pgvector? remove extensão/coluna vector e reaplica
       if (/vector/i.test(e1.message) || e1.code === '42704') {
         console.warn('[db] pgvector indisponível — aplicando schema simplificado');
-        sql = sql.split('\n').filter(l => !/vector/i.test(l)).join('\n')
-                 .replace('CREATE EXTENSION IF NOT EXISTS vector;', '');
+        // remove o bloco INTEIRO da tabela de embeddings (não só linhas soltas)
+        sql = sql.replace(/CREATE TABLE IF NOT EXISTS message_embeddings[\s\S]*?\);/m, '')
+                 .replace(/CREATE INDEX IF NOT EXISTS idx_[\s\S]*?;/m, '')
+                 .replace(/CREATE EXTENSION IF NOT EXISTS vector;/m, '');
         await pool.query(sql);
       } else { throw e1; }
     }
@@ -35,8 +35,6 @@ export async function migrate() {
     console.error('[db] FALHA ao aplicar schema — verifique DATABASE_URL:', e.message);
   }
 }
-
-pool.on('error', e => console.error('[db] pool error:', e.message));
 
 export function query(text, params = []) {
   return pool.query(text, params);
