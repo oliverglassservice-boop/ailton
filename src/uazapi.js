@@ -10,8 +10,6 @@ const TOKEN = process.env.UAZAPI_TOKEN;
 const AUTH_HEADER = process.env.UAZAPI_AUTH_HEADER || 'token';
 
 function headers() {
-  // Envia o token no header configurado + Authorization como fallback
-  // (coberto pela doc de autenticação da Uazapi).
   return {
     'Content-Type': 'application/json',
     [AUTH_HEADER]: TOKEN,
@@ -36,19 +34,25 @@ export async function sendText(number, text) {
 
 /**
  * Normaliza o payload do webhook (EventType + data) para o formato interno.
- * Estrutura defensiva: logs o payload bruto se não reconhecer o formato.
+ * Se não reconhecer, devolve o payload bruto para o log diagnosticar.
  */
 export function parseWebhook(body) {
   const type = body?.EventType || body?.event || '';
   const d = body?.data || body;
-  const isMessage = /message/i.test(type) || !!d?.key;
-
-  if (!isMessage) return null; // connection, presence, labels... → ignorar na Fase 1
-
   const key = d?.key || {};
   const msg = d?.message || {};
   const chatId = key.remoteJid || d?.chatid || d?.chatId || d?.remoteJid;
-  if (!chatId || chatId.includes('@g.us')) return null; // ignora grupos
+  const isMessage =
+    /message/i.test(type) ||
+    !!key.remoteJid ||
+    !!d?.chatid ||
+    !!d?.chatId ||
+    !!d?.remoteJid;
+
+  if (!chatId || chatId.includes('@g.us')) {
+    // devolve marcador especial: payload de outro evento (connection, presence...)
+    return { skip: true, raw: body };
+  }
 
   const fromMe = key.fromMe ?? d?.fromMe ?? false;
   const audio = msg.audioMessage || msg.pttMessage || d?.messageType === 'audio';
@@ -56,8 +60,7 @@ export function parseWebhook(body) {
     msg.conversation ||
     msg.extendedTextMessage?.text ||
     msg.imageMessage?.caption ||
-    d?.text ||
-    '';
+    d?.text || '';
 
   return {
     eventType: type,
@@ -73,7 +76,6 @@ export function parseWebhook(body) {
 
 /** Configura o webhook da instância apontando para este CRM. */
 export async function configureWebhook(url, events = ['messages']) {
-  // Payload conforme https://docs.uazapi.com/reference/updateWebhook.md
   const res = await fetch(`${BASE}/webhook`, {
     method: 'POST',
     headers: headers(),
