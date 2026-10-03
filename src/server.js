@@ -1,9 +1,12 @@
 /**
- * NEON CRM — servidor da Fase 1 (v10).
- * Núcleo: contatos, deals, inbox WhatsApp (Uazapi), AI Gateway (OpenAI).
- * AUTO_RESPOND=true no Environment → a IA responde leads sozinha.
+ * NEON CRM — servidor v11 (blindagem pré-lançamento).
+ * Núcleo: contatos, deals, inbox WhatsApp (Uazapi), AI Gateway (OpenAI),
+ * Prospecção Ativa (Google Places + disparo com guardrails).
  * v9: dedupe de eventos do webhook + logs de diagnóstico do auto-respond.
  * v10: rota /api/debug/env para verificar variáveis sem entrar no EasyPanel.
+ * v11: login no painel (Basic Auth) + persona de vendas p/ leads de
+ *       prospecção + marcação automática "respondeu" + guarda de horário
+ *       da IA (resposta automática só dentro da janela configurada).
  */
 import express from 'express';
 import path from 'path';
@@ -17,14 +20,44 @@ process.on('unhandledRejection', (e) => console.error('[unhandledRejection]', e?
 process.on('uncaughtException', (e) => console.error('[uncaughtException]', e?.message || e));
 
 const app = express();
-app.use(express.json({ limit: '12mb' }));
-mountProspect(app);
+app.use(express.json({ limit: '12mb' })); // webhooks com mídia/base64 podem ser grandes
+mountProspect(app); // módulo de prospecção ativa (rotas /api/prospect/* + worker de disparo)
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-/* ---------------- API: saúde ---------------- */
+/* ---------------- LOGIN DO PAINEL (v11) ----------------
+   PANEL_USER + PANEL_PASS no Environment → painel e APIs pedem login.
+   Sem as variáveis → painel aberto (modo demo). O /api/health e o
+   webhook ficam sempre livres (monitoramento e Uazapi não têm login). */
+const PANEL_USER = process.env.PANEL_USER || '';
+const PANEL_PASS = process.env.PANEL_PASS || '';
+function requirePanelAuth(req, res, next) {
+  if (!PANEL_USER || !PANEL_PASS) return next();
+  const hdr = req.headers.authorization || '';
+  const ok = hdr.startsWith('Basic ') &&
+    Buffer.from(hdr.slice(6), 'base64').toString() === `${PANEL_USER}:${PANEL_PASS}`;
+  if (ok) return next();
+  res.setHeader('WWW-Authenticate', 'Basic realm="NEON CRM"');
+  return res.status(401).send('Login necessário');
+}
+
+/* ---------------- Janela de horário da IA (v11) ----------------
+   Resposta automática só dentro desta janela (horário de Aracaju, UTC-3).
+   Fora dela, a sugestão fica pronta no painel p/ envio manual. */
+const AI_WINDOW = (process.env.AI_WINDOW || '8-20').split('-').map(Number);
+function withinAiHours() {
+  const now = new Date();
+  const h = (now.getUTCHours() + 24 - 3) % 24;
+  const dow = now.getUTCDay(); // 0 = domingo
+  return dow !== 0 && h >= AI_WINDOW[0] && h < AI_WINDOW[1];
+}
+
+/* ---------------- API: saúde (sempre aberta) ---------------- */
 app.get('/api/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
-/* ---------------- API: diagnóstico de Environment (v10, sem expor segredos) ---------------- */
+/* ---------------- APIs protegidas por login ---------------- */
+app.use('/api', (req, res, next) => (req.path === '/health' ? next() : requirePanelAuth(req, res, next)));
+
+/* ---------------- API: diagnóstico de Environment (sem expor segredos) ---------------- */
 app.get('/api/debug/env', (_req, res) => res.json({
   auto_respond: process.env.AUTO_RESPOND || null,
   uazapi_url: process.env.UAZAPI_URL || null,
@@ -32,6 +65,8 @@ app.get('/api/debug/env', (_req, res) => res.json({
   webhook_secret_definido: !!process.env.WEBHOOK_SECRET,
   openai_key_definida: !!process.env.OPENAI_API_KEY,
   uazapi_token_definido: !!process.env.UAZAPI_TOKEN,
+  panel_login_ativo: !!(PANEL_USER && PANEL_PASS),
+  ai_window: `${AI_WINDOW[0]}h-${AI_WINDOW[1]}h`,
 }));
 
 /* ---------------- API: contatos ---------------- */
@@ -171,9 +206,18 @@ app.post('/webhooks/uazapi', async (req, res) => {
 
     const { contact, conversation } = await ensureContactAndConversation(msg.chatId.split('@')[0], msg.senderName);
 
+    // v11: se o remetente é um lead de prospecção, marca "respondeu" na fila de caça
+    const waNumber = msg.chatId.split('@')[0];
+    if (!msg.fromMe) {
+      await query(
+        `UPDATE prospect_leads SET status='respondeu' WHERE phone=$1 AND status IN ('fila','enviado')`,
+        [waNumber]
+      );
+    }
+
     let body = msg.text;
     if (msg.kind === 'audio' && !body) {
-      body = '[áudio recebido]'; // transcrição completa: ai.transcribeAudio já pronta (Fase 2)
+      body = '[áudio recebido]'; // transcrição completa: ai.transcribeAudio já pronta (próxima fase)
     }
     await query(
       `INSERT INTO messages (conversation_id, direction, kind, body, wa_message_id, raw)
@@ -190,43 +234,56 @@ app.post('/webhooks/uazapi', async (req, res) => {
     // ---- IA em background: intenção + sugestão (+ auto-resposta opcional) ----
     (async () => {
       try {
+        // v11: lead de prospecção? → a IA troca de persona (vende o NEON, não o estúdio)
+        const isProspect = (await query(
+          `SELECT 1 FROM prospect_leads WHERE phone=$1 AND status IN ('fila','enviado','respondeu') LIMIT 1`,
+          [waNumber]
+        )).rowCount > 0;
+
         const intent = await ai.classifyIntent(msg.text);
         await query(`UPDATE thread_state SET intent = $2, updated_at = now() WHERE conversation_id = $1`,
           [conversation.id, intent]);
         const recent = (await query(
           `SELECT direction, body FROM messages WHERE conversation_id = $1 ORDER BY created_at DESC LIMIT 10`,
           [conversation.id])).rows.reverse();
-        const suggestion = await ai.suggestReply(recent, { name: contact.name, company: contact.company });
+        const suggestion = await ai.suggestReply(recent, {
+          name: contact.name, company: contact.company, is_prospect: isProspect,
+        });
         await query(
           `UPDATE thread_state SET next_suggestion = $2, updated_at = now() WHERE conversation_id = $1`,
           [conversation.id, suggestion]);
-        console.log('[ia] sugestão pronta p/ conversa', conversation.id);
+        console.log('[ia] sugestão pronta p/ conversa', conversation.id,
+          isProspect ? '(persona: vendas NEON)' : '(persona: atendente do negócio)');
 
-        // ---- AUTO-RESPOSTA (interruptor: AUTO_RESPOND=true no Environment) ----
+        // ---- AUTO-RESPOSTA (interruptor AUTO_RESPOND=true + janela de horário) ----
         if ((process.env.AUTO_RESPOND || 'false') === 'true') {
-          // proteção anti-duplicidade: não reenvia resposta idêntica em menos de 90s
-          const dupSend = await query(
-            `SELECT 1 FROM messages WHERE conversation_id = $1 AND direction = 'out'
-             AND body = $2 AND created_at > now() - interval '90 seconds' LIMIT 1`,
-            [conversation.id, suggestion]);
-          if (dupSend.rowCount > 0) {
-            console.log('[auto] resposta idêntica enviada há pouco — reenvio ignorado');
+          if (!withinAiHours()) {
+            console.log('[auto] fora da janela de horário — resposta fica como sugestão p/ envio manual');
           } else {
-            console.log('[auto] enviando resposta automática p/ conversa', conversation.id);
-            try {
-              const sent = await uazapi.sendText(conversation.wa_chat_id, suggestion);
-              await query(
-                `INSERT INTO messages (conversation_id, direction, kind, body, wa_message_id)
-                 VALUES ($1,'out','text',$2,$3)`,
-                [conversation.id, suggestion, sent?.id ? String(sent.id) : null]
-              );
-              await query(`UPDATE conversations SET last_msg_at = now() WHERE id = $1`, [conversation.id]);
-              await query(`UPDATE thread_state SET next_suggestion = NULL WHERE conversation_id = $1`,
-                [conversation.id]);
-              console.log('[auto] ✅ resposta enviada automaticamente p/ conversa', conversation.id);
-            } catch (sendErr) {
-              console.error('[auto] ❌ FALHA ao enviar via Uazapi:', sendErr.message,
-                '— sugestão mantida p/ envio manual');
+            // proteção anti-duplicidade: não reenvia resposta idêntica em menos de 90s
+            const dupSend = await query(
+              `SELECT 1 FROM messages WHERE conversation_id = $1 AND direction = 'out'
+               AND body = $2 AND created_at > now() - interval '90 seconds' LIMIT 1`,
+              [conversation.id, suggestion]);
+            if (dupSend.rowCount > 0) {
+              console.log('[auto] resposta idêntica enviada há pouco — reenvio ignorado');
+            } else {
+              console.log('[auto] enviando resposta automática p/ conversa', conversation.id);
+              try {
+                const sent = await uazapi.sendText(conversation.wa_chat_id, suggestion);
+                await query(
+                  `INSERT INTO messages (conversation_id, direction, kind, body, wa_message_id)
+                   VALUES ($1,'out','text',$2,$3)`,
+                  [conversation.id, suggestion, sent?.id ? String(sent.id) : null]
+                );
+                await query(`UPDATE conversations SET last_msg_at = now() WHERE id = $1`, [conversation.id]);
+                await query(`UPDATE thread_state SET next_suggestion = NULL WHERE conversation_id = $1`,
+                  [conversation.id]);
+                console.log('[auto] ✅ resposta enviada automaticamente p/ conversa', conversation.id);
+              } catch (sendErr) {
+                console.error('[auto] ❌ FALHA ao enviar via Uazapi:', sendErr.message,
+                  '— sugestão mantida p/ envio manual');
+              }
             }
           }
         } else {
@@ -239,12 +296,13 @@ app.post('/webhooks/uazapi', async (req, res) => {
   }
 });
 
-/* ---------------- UI ---------------- */
+/* ---------------- UI (protegida por login quando configurado) ---------------- */
+app.use(requirePanelAuth);
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
 const PORT = process.env.PORT || 3000;
 await migrate();
-console.log(`[boot] NEON CRM v10 no ar | AUTO_RESPOND=${process.env.AUTO_RESPOND || '(NÃO definido!)'} | UAZAPI_URL=${process.env.UAZAPI_URL || '(NÃO definido!)'}`);
+console.log(`[boot] NEON CRM v11 no ar | AUTO_RESPOND=${process.env.AUTO_RESPOND || '(NÃO definido!)'} | UAZAPI_URL=${process.env.UAZAPI_URL || '(NÃO definido!)'} | login_painel=${PANEL_USER && PANEL_PASS ? 'ATIVO' : 'desativado'} | janela_IA=${AI_WINDOW[0]}h-${AI_WINDOW[1]}h`);
 app.listen(PORT, () => console.log(`NEON CRM no ar em ${process.env.APP_URL || 'http://localhost:' + PORT}`));
 
 process.on('SIGTERM', () => { pool.end().then(() => process.exit(0)); });
