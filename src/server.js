@@ -1,11 +1,12 @@
 /**
- * NEON CRM — servidor v12 (Fase 4: agenda real + lembretes + áudio).
- * Núcleo: contatos, deals, inbox WhatsApp (Uazapi), AI Gateway (OpenAI),
+ * NEON CRM — servidor v13 (multi-provedor WhatsApp: Evolution API | Uazapi).
+ * Núcleo: contatos, deals, inbox WhatsApp, AI Gateway (OpenAI),
  * Prospecção Ativa (Google Places + disparo com guardrails).
- * v11: login no painel (Basic Auth) + persona de vendas + marcação
- *       automática "respondeu" + guarda de horário da IA.
+ * v11: login no painel (Basic Auth) + persona de vendas + guarda de horário.
  * v12: agenda real (appointments), lembretes automáticos D-1/2h,
  *       transcrição de áudio (Whisper) direto no webhook.
+ * v13: WHATSAPP_PROVIDER=evolution|uazapi (padrão: uazapi até migrar).
+ *       Webhook aceita /webhooks/evolution e /webhooks/uazapi (mesmo handler).
  */
 import express from 'express';
 import path from 'path';
@@ -13,10 +14,15 @@ import { fileURLToPath } from 'url';
 import { query, ensureContactAndConversation, migrate, pool } from './db.js';
 import * as ai from './ai.js';
 import * as uazapi from './uazapi.js';
+import * as evolution from './evolution.js';
 import { mountProspect } from './prospect.js';
 
 process.on('unhandledRejection', (e) => console.error('[unhandledRejection]', e?.message || e));
 process.on('uncaughtException', (e) => console.error('[uncaughtException]', e?.message || e));
+
+// ---- Provedor de WhatsApp (mesmo contrato nas duas camadas) ----
+const PROVIDER = (process.env.WHATSAPP_PROVIDER || 'uazapi').toLowerCase();
+const wa = PROVIDER === 'evolution' ? evolution : uazapi;
 
 const app = express();
 app.use(express.json({ limit: '12mb' })); // webhooks com mídia/base64 podem ser grandes
@@ -26,7 +32,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /* ---------------- LOGIN DO PAINEL (v11) ----------------
    PANEL_USER + PANEL_PASS no Environment → painel e APIs pedem login.
    Sem as variáveis → painel aberto (modo demo). O /api/health e o
-   webhook ficam sempre livres (monitoramento e Uazapi não têm login). */
+   webhook ficam sempre livres (monitoramento e a API de WhatsApp não têm login). */
 const PANEL_USER = process.env.PANEL_USER || '';
 const PANEL_PASS = process.env.PANEL_PASS || '';
 function requirePanelAuth(req, res, next) {
@@ -58,12 +64,15 @@ app.use('/api', (req, res, next) => (req.path === '/health' ? next() : requirePa
 
 /* ---------------- API: diagnóstico de Environment (sem expor segredos) ---------------- */
 app.get('/api/debug/env', (_req, res) => res.json({
+  provider: PROVIDER,
   auto_respond: process.env.AUTO_RESPOND || null,
   uazapi_url: process.env.UAZAPI_URL || null,
+  evolution_url: process.env.EVOLUTION_URL || null,
+  evolution_instance: process.env.EVOLUTION_INSTANCE || null,
   app_url: process.env.APP_URL || null,
   webhook_secret_definido: !!process.env.WEBHOOK_SECRET,
   openai_key_definida: !!process.env.OPENAI_API_KEY,
-  uazapi_token_definido: !!process.env.UAZAPI_TOKEN,
+  whatsapp_key_definida: !!(process.env.UAZAPI_TOKEN || process.env.EVOLUTION_API_KEY),
   panel_login_ativo: !!(PANEL_USER && PANEL_PASS),
   ai_window: `${AI_WINDOW[0]}h-${AI_WINDOW[1]}h`,
 }));
@@ -162,17 +171,17 @@ app.post('/api/threads/:id/summary', async (req, res) => {
   res.json({ summary });
 });
 
-/** Envia mensagem pelo WhatsApp real (Uazapi) e persiste */
+/** Envia mensagem pelo WhatsApp real e persiste */
 app.post('/api/messages/send', async (req, res) => {
   const { conversation_id, text } = req.body;
   const conv = (await query(`SELECT * FROM conversations WHERE id = $1`, [conversation_id])).rows[0];
   if (!conv) return res.status(404).json({ error: 'conversa não encontrada' });
   try {
-    const out = await uazapi.sendText(conv.wa_chat_id, text);
+    const out = await wa.sendText(conv.wa_chat_id, text);
     await query(
       `INSERT INTO messages (conversation_id, direction, kind, body, wa_message_id)
        VALUES ($1,'out','text',$2,$3)`,
-      [conversation_id, text, out?.id ? String(out.id) : null]
+      [conversation_id, text, out?.id ? String(out.id) : (out?.key?.id ? String(out.key.id) : null)]
     );
     await query(`UPDATE conversations SET last_msg_at = now() WHERE id = $1`, [conversation_id]);
     await query(
@@ -185,16 +194,16 @@ app.post('/api/messages/send', async (req, res) => {
   }
 });
 
-/* ---------------- WEBHOOK Uazapi ---------------- */
-app.post('/webhooks/uazapi', async (req, res) => {
+/* ---------------- WEBHOOK WhatsApp (Uazapi | Evolution — mesmo handler) ---------------- */
+async function waWebhook(req, res) {
   if (req.query.secret !== process.env.WEBHOOK_SECRET) return res.status(401).send('forbidden');
   res.json({ ok: true }); // responde rápido; a IA roda em background
   try {
-    const msg = uazapi.parseWebhook(req.body);
+    const msg = wa.parseWebhook(req.body);
     if (!msg) return;
     console.log('[webhook]', msg.eventType, msg.chatId, msg.kind);
 
-    // ---- DEDUPE: a Uazapi pode reenviar o mesmo evento (ou há 2 webhooks registrados) ----
+    // ---- DEDUPE: a API pode reenviar o mesmo evento ----
     if (msg.waMessageId) {
       const dup = await query(`SELECT 1 FROM messages WHERE wa_message_id = $1 LIMIT 1`, [String(msg.waMessageId)]);
       if (dup.rowCount > 0) {
@@ -218,7 +227,7 @@ app.post('/webhooks/uazapi', async (req, res) => {
     // v12: áudio → baixa mídia + transcreve com Whisper (fallback: placeholder)
     if (msg.kind === 'audio' && !body && msg.waMessageId) {
       try {
-        const buf = await uazapi.downloadMedia(msg.waMessageId);
+        const buf = await wa.downloadMedia(msg.waMessageId);
         body = (await ai.transcribeAudio(buf)) || '[áudio sem texto]';
         console.log('[audio] transcrito:', body.slice(0, 60));
       } catch (e) {
@@ -241,7 +250,7 @@ app.post('/webhooks/uazapi', async (req, res) => {
     // ---- IA em background: intenção + sugestão (+ auto-resposta opcional) ----
     (async () => {
       try {
-        // v11: lead de prospecção? → a IA ajusta o foco (vende a Mais Automação)
+        // v11: lead de prospecção? → a IA troca de persona (vende o Mais Automação)
         const isProspect = (await query(
           `SELECT 1 FROM prospect_leads WHERE phone=$1 AND status IN ('fila','enviado','respondeu') LIMIT 1`,
           [waNumber]
@@ -280,7 +289,7 @@ app.post('/webhooks/uazapi', async (req, res) => {
                   [conversation.id]);
                 await query(`UPDATE conversations SET last_msg_at = now() WHERE id = $1`, [conversation.id]);
                 try {
-                  await uazapi.sendText(conversation.wa_chat_id, conf);
+                  await wa.sendText(conversation.wa_chat_id, conf);
                   console.log('[agenda] ✅ agendamento gravado e confirmado:', appt.date, appt.time);
                 } catch (e2) {
                   console.error('[agenda] gravado no painel, mas falhou o envio da confirmação:', e2.message);
@@ -305,18 +314,18 @@ app.post('/webhooks/uazapi', async (req, res) => {
             } else {
               console.log('[auto] enviando resposta automática p/ conversa', conversation.id);
               try {
-                const sent = await uazapi.sendText(conversation.wa_chat_id, suggestion);
+                const sent = await wa.sendText(conversation.wa_chat_id, suggestion);
                 await query(
                   `INSERT INTO messages (conversation_id, direction, kind, body, wa_message_id)
                    VALUES ($1,'out','text',$2,$3)`,
-                  [conversation.id, suggestion, sent?.id ? String(sent.id) : null]
+                  [conversation.id, suggestion, sent?.id ? String(sent.id) : (sent?.key?.id ? String(sent.key.id) : null)]
                 );
                 await query(`UPDATE conversations SET last_msg_at = now() WHERE id = $1`, [conversation.id]);
                 await query(`UPDATE thread_state SET next_suggestion = NULL WHERE conversation_id = $1`,
                   [conversation.id]);
                 console.log('[auto] ✅ resposta enviada automaticamente p/ conversa', conversation.id);
               } catch (sendErr) {
-                console.error('[auto] ❌ FALHA ao enviar via Uazapi:', sendErr.message,
+                console.error('[auto] ❌ FALHA ao enviar:', sendErr.message,
                   '— sugestão mantida p/ envio manual');
               }
             }
@@ -329,7 +338,9 @@ app.post('/webhooks/uazapi', async (req, res) => {
   } catch (e) {
     console.error('[webhook] erro:', e.message);
   }
-});
+}
+app.post('/webhooks/uazapi', waWebhook);
+app.post('/webhooks/evolution', waWebhook);
 
 /* ---------------- UI (protegida por login quando configurado) ---------------- */
 app.use(requirePanelAuth);
@@ -352,7 +363,7 @@ setInterval(async () => {
        LIMIT 5`);
     for (const r of d1.rows) {
       try {
-        await uazapi.sendText(r.wa_chat_id, REMINDER_D1);
+        await wa.sendText(r.wa_chat_id, REMINDER_D1);
         await query(`UPDATE appointments SET reminder_1_sent = now() WHERE id = $1`, [r.id]);
         console.log('[lembrete] D-1 enviado (appt', r.id + ')');
       } catch (e) { console.error('[lembrete] falha D-1 appt', r.id, ':', e.message); }
@@ -365,7 +376,7 @@ setInterval(async () => {
        LIMIT 5`);
     for (const r of h2.rows) {
       try {
-        await uazapi.sendText(r.wa_chat_id, REMINDER_H2);
+        await wa.sendText(r.wa_chat_id, REMINDER_H2);
         await query(`UPDATE appointments SET reminder_2_sent = now() WHERE id = $1`, [r.id]);
         console.log('[lembrete] 2h enviado (appt', r.id + ')');
       } catch (e) { console.error('[lembrete] falha 2h appt', r.id, ':', e.message); }
@@ -373,7 +384,7 @@ setInterval(async () => {
   } catch (e) { console.error('[lembrete] erro no worker:', e.message); }
 }, 5 * 60 * 1000);
 
-console.log(`[boot] NEON CRM v12 no ar | AUTO_RESPOND=${process.env.AUTO_RESPOND || '(NÃO definido!)'} | UAZAPI_URL=${process.env.UAZAPI_URL || '(NÃO definido!)'} | login_painel=${PANEL_USER && PANEL_PASS ? 'ATIVO' : 'desativado'} | janela_IA=${AI_WINDOW[0]}h-${AI_WINDOW[1]}h | agenda+lembretes+áudio: LIGADOS`);
+console.log(`[boot] NEON CRM v13 no ar | provider=${PROVIDER} | AUTO_RESPOND=${process.env.AUTO_RESPOND || '(NÃO definido!)'} | login_painel=${PANEL_USER && PANEL_PASS ? 'ATIVO' : 'desativado'} | janela_IA=${AI_WINDOW[0]}h-${AI_WINDOW[1]}h | agenda+lembretes+áudio: LIGADOS`);
 app.listen(PORT, () => console.log(`NEON CRM no ar em ${process.env.APP_URL || 'http://localhost:' + PORT}`));
 
 process.on('SIGTERM', () => { pool.end().then(() => process.exit(0)); });
