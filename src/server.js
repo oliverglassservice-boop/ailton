@@ -11,12 +11,14 @@ import { fileURLToPath } from 'url';
 import { query, ensureContactAndConversation, migrate, pool } from './db.js';
 import * as ai from './ai.js';
 import * as uazapi from './uazapi.js';
+import { mountProspect } from './prospect.js';
 
 process.on('unhandledRejection', (e) => console.error('[unhandledRejection]', e?.message || e));
 process.on('uncaughtException', (e) => console.error('[uncaughtException]', e?.message || e));
 
 const app = express();
 app.use(express.json({ limit: '12mb' }));
+mountProspect(app);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /* ---------------- API: saúde ---------------- */
