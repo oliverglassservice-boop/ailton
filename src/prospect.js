@@ -1,5 +1,5 @@
 /**
- * NEON PROSPECÇÃO ATIVA — o sistema pesca os próprios clientes do NEON.
+ * NEON PROSPECÇÃO ATIVA — o sistema pesca os próprios clientes do Mais Automação.
  *
  * Fluxo: busca negócios no Google Places (salões, bares, restaurantes…)
  * → importa como leads → enfileira → envia mensagem humanizada pelo
@@ -11,7 +11,10 @@
  */
 import express from 'express';
 import { query } from './db.js';
-import * as uazapi from './uazapi.js';
+// Provedor WhatsApp: evolution (padrão novo) ou uazapi (legado) — mesmo contrato.
+const wa = (process.env.WHATSAPP_PROVIDER || 'uazapi') === 'evolution'
+  ? await import('./evolution.js')
+  : await import('./uazapi.js');
 
 /* ------------------------- configuração ------------------------- */
 const SECRET = process.env.PROSPECT_SECRET || '';
@@ -121,7 +124,7 @@ async function tick() {
     if (!lead) return;
     const text = personalize(await getTemplate(), lead);
     try {
-      await uazapi.sendText(lead.phone, text);
+      await wa.sendText(lead.phone, text);
       await query(
         `UPDATE prospect_leads SET status='enviado', last_message=$2, sent_count=sent_count+1,
          last_sent_at=now() WHERE id=$1`,
