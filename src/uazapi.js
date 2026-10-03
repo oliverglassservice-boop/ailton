@@ -1,13 +1,17 @@
 /**
  * ADAPTADOR UAZAPI — camada de conector trocável.
- * Formato real do webhook (docs.uazapi.com/reference/webhooks/messages.md):
- * { EventType, owner, token, BaseUrl, instanceName, message: { chatid, sender, senderName, fromMe, messageType, text, id } }
+ * Para trocar por Evolution API ou Cloud API (Meta) no futuro,
+ * implemente as MESMAS funções exportadas aqui. Nada mais muda.
+ *
+ * Contrato oficial: https://docs.uazapi.com/ (OpenAPI em /openapi-bundled.json)
  */
 const BASE = (process.env.UAZAPI_BASE_URL || process.env.UAZAPI_URL || '').replace(/\/$/, '');
 const TOKEN = process.env.UAZAPI_TOKEN;
 const AUTH_HEADER = process.env.UAZAPI_AUTH_HEADER || 'token';
 
 function headers() {
+  // Envia o token no header configurado + Authorization como fallback
+  // (coberto pela doc de autenticação da Uazapi).
   return {
     'Content-Type': 'application/json',
     [AUTH_HEADER]: TOKEN,
@@ -30,36 +34,46 @@ export async function sendText(number, text) {
   return res.json();
 }
 
-/** Normaliza o payload REAL da Uazapi para o formato interno do CRM. */
+/**
+ * Normaliza o payload do webhook (EventType + data) para o formato interno.
+ * Estrutura defensiva: logs o payload bruto se não reconhecer o formato.
+ */
 export function parseWebhook(body) {
   const type = body?.EventType || body?.event || '';
-  const m = body?.message || {};
+  const d = body?.data || body;
+  const isMessage = /message/i.test(type) || !!d?.key;
 
-  const chatId = m.chatid || m.chatId || m.sender || null;
-  if (!chatId || m.isGroup === true || String(chatId).includes('@g.us')) {
-    return null;
-  }
+  if (!isMessage) return null; // connection, presence, labels... → ignorar na Fase 1
 
-  const fromMe = m.fromMe === true || m.wasSentByApi === true;
-  const kind = (m.messageType === 'audio' || m.messageType === 'ptt') ? 'audio'
-    : (m.messageType === 'image' || m.messageType === 'document') ? m.messageType
-    : 'text';
-  const text = m.text || m.content || '';
+  const key = d?.key || {};
+  const msg = d?.message || {};
+  const chatId = key.remoteJid || d?.chatid || d?.chatId || d?.remoteJid;
+  if (!chatId || chatId.includes('@g.us')) return null; // ignora grupos
+
+  const fromMe = key.fromMe ?? d?.fromMe ?? false;
+  const audio = msg.audioMessage || msg.pttMessage || d?.messageType === 'audio';
+  const text =
+    msg.conversation ||
+    msg.extendedTextMessage?.text ||
+    msg.imageMessage?.caption ||
+    d?.text ||
+    '';
 
   return {
     eventType: type,
     chatId,
     fromMe,
-    senderName: m.senderName || '',
-    kind,
+    senderName: d?.pushName || d?.sender?.pushname || '',
+    kind: audio ? 'audio' : text ? 'text' : 'other',
     text,
-    waMessageId: m.messageid || m.id || '',
+    waMessageId: key.id || d?.id || '',
     raw: body,
   };
 }
 
 /** Configura o webhook da instância apontando para este CRM. */
 export async function configureWebhook(url, events = ['messages']) {
+  // Payload conforme https://docs.uazapi.com/reference/updateWebhook.md
   const res = await fetch(`${BASE}/webhook`, {
     method: 'POST',
     headers: headers(),
@@ -67,4 +81,24 @@ export async function configureWebhook(url, events = ['messages']) {
   });
   if (!res.ok) throw new Error(`Uazapi webhook config ${res.status}`);
   return res.json();
+}
+
+/**
+ * Baixa a mídia de uma mensagem (áudio/imagem) — POST /message/download,
+ * corpo { messageid }, retorno { base64 } (docs.uazapi.com).
+ */
+export async function downloadMedia(messageId) {
+  const res = await fetch(`${BASE}/message/download`, {
+    method: 'POST',
+    headers: headers(),
+    body: JSON.stringify({ messageid: String(messageId) }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Uazapi download ${res.status}: ${body.slice(0, 150)}`);
+  }
+  const j = await res.json();
+  const b64 = j.base64 || j.data || j.content || '';
+  if (!b64) throw new Error('download sem base64 na resposta');
+  return Buffer.from(b64, 'base64');
 }
