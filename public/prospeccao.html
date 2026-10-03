@@ -49,7 +49,7 @@ td{padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
   <h2>1 · Buscar negócios no Google</h2>
   <div class="row">
     <input type="text" id="q" placeholder='ex.: "salão de beleza em Aracaju" ou "bares em Aracaju"'>
-    <button onclick="search()">Buscar</button>
+    <button id="btnSearch" onclick="search()">Buscar</button>
   </div>
   <div id="cands"></div>
   <div class="row" style="margin-top:10px">
@@ -83,8 +83,15 @@ td{padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
 
 <script>
 const secret = new URLSearchParams(location.search).get('secret') || '';
-const j = (url, body) => fetch(url + '?secret=' + secret, body ? {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)} : undefined)
-  .then(r => r.json());
+const j = async (url, body) => {
+  const r = await fetch(url + '?secret=' + secret, body ? {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)} : undefined);
+  const txt = await r.text();
+  let d;
+  try { d = JSON.parse(txt); }
+  catch { throw new Error('O servidor não respondeu JSON (HTTP ' + r.status + '). Se você acabou de dar Deploy, aguarde 1 minuto e clique de novo.'); }
+  if (!r.ok) throw new Error(d.error || ('Erro HTTP ' + r.status));
+  return d;
+};
 let lastCandidates = [];
 
 async function loadStatus(){
@@ -105,14 +112,18 @@ const stat = (l,v) => `<div class="stat"><b>${v}</b>${l}</div>`;
 async function search(){
   const q = document.getElementById('q').value.trim();
   if (!q) return alert('Digite o que buscar');
-  const r = await j('/api/prospect/search', {query:q});
-  if (r.error) return alert(r.error);
-  lastCandidates = r.candidates;
+  const btn = document.getElementById('btnSearch');
+  btn.disabled = true; btn.textContent = 'Buscando…';
+  try {
+    const r = await j('/api/prospect/search', {query:q});
+    lastCandidates = r.candidates;
   document.getElementById('cands').innerHTML = r.candidates.map((c,i)=>
     `<div><input type="checkbox" ${c.ja_importado||!c.phone?'disabled':''} data-i="${i}" ${c.ja_importado||!c.phone?'':'checked'}>
      <b>${esc(c.name)}</b> <span class="muted">${esc(c.address||'')}</span>
      ${c.phone?`<span class="tag">${c.phone}</span>`:'<span class="tag optout">sem telefone</span>'}
      ${c.ja_importado?'<span class="tag respondeu">já importado</span>':''}</div>`).join('');
+  } catch (e) { alert('Falha na busca: ' + e.message); }
+  btn.disabled = false; btn.textContent = 'Buscar';
 }
 function esc(s){return (s||'').replace(/[<>&]/g, m=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[m]))}
 
