@@ -14,6 +14,8 @@
  *        leads de teste (source_query='teste-manual'), nunca para leads reais.
  * v13.5.4: SAVE COM UPSERT — a mensagem de abordagem grava mesmo se a linha
  *        'template' não existir (o UPDATE antigo falhava em silêncio).
+ * v13.5.5: LIMPAR TESTES — botão que apaga TODOS os leads de teste (nunca os
+ *        reais) + lead de teste já nasce na fila (adicionou = pronto p/ 🧪).
  */
 import express from 'express';
 import { query } from './db.js';
@@ -128,8 +130,6 @@ async function tick() {
   try {
     if (!running || !withinBusinessHours()) return;
     if ((await sentToday()) >= DAILY_CAP) return;
-    // v13.5.2: em MODO TESTE, a query só enxerga leads de teste —
-    // leads reais na fila ficam intocados até o disparo REAL ser iniciado.
     const lead = (await query(
       `SELECT l.* FROM prospect_leads l
         WHERE l.status = 'fila' AND l.phone <> ''
@@ -214,21 +214,31 @@ export function mountProspect(app) {
   });
 
   router.post('/leads/manual', async (req, res) => {
-    // v13.5.1: lead de TESTE manual — enfileira números próprios para a
-    // prova de fogo do disparo (rodapé, SAIR, resposta) sem tocar em leads reais.
+    // v13.5.5: lead de teste JÁ NASCE NA FILA — adicionou, está pronto p/ o 🧪.
+    // (sem precisar do "Colocar todos os novos", que mistura leads reais)
     try {
       const { name, phone } = req.body;
       if (!name || !phone) return res.status(400).json({ error: 'informe nome e telefone' });
       const digits = String(phone).replace(/\D/g, '');
       if (digits.length < 10) return res.status(400).json({ error: 'telefone inválido (use 55 + DDD + número)' });
       const r = await query(
-        `INSERT INTO prospect_leads (place_id, name, category, phone, source_query)
-         VALUES ($1,$2,$3,$4,'teste-manual')
-         ON CONFLICT (place_id) DO UPDATE SET name = $2, phone = $4
+        `INSERT INTO prospect_leads (place_id, name, category, phone, source_query, status)
+         VALUES ($1,$2,$3,$4,'teste-manual','fila')
+         ON CONFLICT (place_id) DO UPDATE SET name = $2, phone = $4, status = 'fila'
          RETURNING *`,
         [`manual-${digits}`, name, 'teste manual', digits]
       );
       res.json(r.rows[0]);
+    } catch (e) { res.status(500).json({ error: String(e.message) }); }
+  });
+
+  router.post('/leads/clear-tests', async (_req, res) => {
+    // v13.5.5: apaga TODOS os leads com source_query='teste-manual'.
+    // Leads reais do Google NUNCA são tocados por esta rota — filtro absoluto.
+    try {
+      const r = await query(`DELETE FROM prospect_leads WHERE source_query = 'teste-manual' RETURNING id`);
+      console.log('[prospect] 🧹 leads de teste apagados:', r.rowCount);
+      res.json({ removed: r.rowCount });
     } catch (e) { res.status(500).json({ error: String(e.message) }); }
   });
 
@@ -296,5 +306,5 @@ export function mountProspect(app) {
   app.use('/api/prospect', router);
   migrate().catch(e => console.error('[prospect] migração:', e.message));
   setInterval(tick, 60_000); // verifica a cada minuto (máx. 1 msg/min — ritmo seguro)
-  console.log('[prospect] módulo de prospecção montado (rotas /api/prospect/*, worker 1/min, suporte a MODO TESTE)');
+  console.log('[prospect] módulo de prospecção montado (rotas /api/prospect/*, worker 1/min)');
 }
