@@ -1,5 +1,5 @@
 /**
- * NEON CRM — servidor v13.5 (multi-provedor WhatsApp: Evolution API | Uazapi).
+ * NEON CRM — servidor v13.5.6 (multi-provedor WhatsApp: Evolution API | Uazapi).
  * Núcleo: contatos, deals, inbox WhatsApp, AI Gateway (OpenAI),
  * Prospecção Ativa (Google Places + disparo com guardrails).
  * v11: login no painel (Basic Auth) + persona de vendas + guarda de horário.
@@ -16,6 +16,9 @@
  * v13.5: OPT-OUT LGPD — "SAIR" marca o contato (nunca mais recebe resposta
  *       automática nem disparo de prospecção) + PAINEL DE MÉTRICAS
  *       (/api/metrics + aba "Métricas" no painel).
+ * v13.5.6: REATIVAR CONTATO — botão no painel desfaz o opt-out (ação humana,
+ *       com reconsentimento — a porta de volta prevista em "se um dia mudar
+ *       de ideia, estarei por aqui").
  */
 import express from 'express';
 import path from 'path';
@@ -132,6 +135,18 @@ app.post('/api/contacts', async (req, res) => {
     [name, company || '', role || '', email || '', wa_id || null]
   );
   res.json(r.rows[0]);
+});
+
+/** v13.5.6: REATIVAR contato que pediu SAIR — somente por ação humana no painel
+ *  (reconsentimento explícito, LGPD-friendly). Deixa a Mariana responder e o
+ *  disparo voltar a incluir o número. */
+app.post('/api/contacts/:id/reactivate', async (req, res) => {
+  const r = await query(
+    `UPDATE contacts SET opt_out = FALSE, consent_lgpd = TRUE WHERE id = $1 RETURNING *`,
+    [req.params.id]
+  );
+  if (r.rows[0]) console.log('[optout] ✅ contato REATIVADO pelo painel:', r.rows[0].wa_id);
+  res.json(r.rows[0] || {});
 });
 
 /* ---------------- API: funil ---------------- */
@@ -466,7 +481,7 @@ setInterval(async () => {
   } catch (e) { console.error('[lembrete] erro no worker:', e.message); }
 }, 5 * 60 * 1000);
 
-console.log(`[boot] NEON CRM v13.5 no ar | provider=${PROVIDER} | AUTO_RESPOND=${process.env.AUTO_RESPOND || '(NÃO definido!)'} | login_painel=${PANEL_USER && PANEL_PASS ? 'ATIVO' : 'desativado'} | janela_IA=${AI_WINDOW[0]}h-${AI_WINDOW[1]}h | opt-out: LIGADO | agenda+lembretes+áudio+métricas: LIGADOS`);
+console.log(`[boot] NEON CRM v13.5.6 no ar | provider=${PROVIDER} | AUTO_RESPOND=${process.env.AUTO_RESPOND || '(NÃO definido!)'} | login_painel=${PANEL_USER && PANEL_PASS ? 'ATIVO' : 'desativado'} | janela_IA=${AI_WINDOW[0]}h-${AI_WINDOW[1]}h | opt-out: LIGADO | agenda+lembretes+áudio+métricas: LIGADOS`);
 app.listen(PORT, () => console.log(`NEON CRM no ar em ${process.env.APP_URL || 'http://localhost:' + PORT}`));
 
 process.on('SIGTERM', () => { pool.end().then(() => process.exit(0)); });
