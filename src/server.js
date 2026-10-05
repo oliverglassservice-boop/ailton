@@ -1,5 +1,5 @@
 /**
- * NEON CRM — servidor v13.5.6 (multi-provedor WhatsApp: Evolution API | Uazapi).
+ * NEON CRM — servidor v13.6.2 (multi-provedor WhatsApp: Evolution API | Uazapi).
  * Núcleo: contatos, deals, inbox WhatsApp, AI Gateway (OpenAI),
  * Prospecção Ativa (Google Places + disparo com guardrails).
  * v11: login no painel (Basic Auth) + persona de vendas + guarda de horário.
@@ -19,6 +19,13 @@
  * v13.5.6: REATIVAR CONTATO — botão no painel desfaz o opt-out (ação humana,
  *       com reconsentimento — a porta de volta prevista em "se um dia mudar
  *       de ideia, estarei por aqui").
+ * v13.6.2: OPT-OUT POR PALAVRAS-CHAVE — "STOP", "quero parar de receber
+ *       mensagens de vocês", "me descadastra de tudo" agora derrubam a
+ *       automação na hora (antes: só a frase exata, tipo "sair" sozinho —
+ *       o teste de IA pegou essa brecha). + DETECÇÃO DE ESCALAÇÃO
+ *       ("pessoa de verdade", gerente, pós-venda grave, concorrente):
+ *       intent='escalacao' fica visível no painel pro Ailton correr pro
+ *       inbox. Detetores moram na ai.js (detectOptOut/detectEscalation).
  */
 import express from 'express';
 import path from 'path';
@@ -312,10 +319,13 @@ async function waWebhook(req, res) {
 
     if (msg.fromMe || msg.kind !== 'text') return;
 
-    // ---- v13.5: OPT-OUT (LGPD) — pedido de saída é honrado na hora, sem IA ----
+    // ---- v13.5/v13.6.2: OPT-OUT (LGPD) — pedido de saída é honrado na hora, sem IA.
+    // v13.6.2: detetor por PALAVRAS-CHAVE (ai.detectOptOut, custo zero, pega
+    // "STOP", "quero parar de receber mensagens de vocês", "me descadastra de
+    // tudo", "me tira da lista"…) + palavras-soltas clássicas por segurança.
     const norm = body.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
       .replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
-    if (/^(sair|parar|descadastrar|nao quero mais|nao quero receber|parar de receber|nao quero ser mais procurado)$/.test(norm)) {
+    if (ai.detectOptOut(body) || /^(sair|parar|pare|parem|descadastrar)$/.test(norm)) {
       await query(`UPDATE contacts SET opt_out = TRUE, consent_lgpd = FALSE WHERE id = $1`, [contact.id]);
       await query(`UPDATE prospect_leads SET status = 'optout' WHERE phone = $1`, [waNumber]);
       const confirmMsg = 'Registrado! A partir de agora não vou mais te mandar mensagem. Se um dia mudar de ideia, estarei por aqui. 💜';
@@ -343,7 +353,13 @@ async function waWebhook(req, res) {
           [waNumber]
         )).rowCount > 0;
 
-        const intent = await ai.classifyIntent(msg.text);
+        // v13.6.2: usa o texto final da mensagem (texto digitado OU transcrição
+        // de áudio — antes ia msg.text, que é vazio em áudio transcrito).
+        let intent = await ai.classifyIntent(body);
+        if (ai.detectEscalation(body)) {
+          intent = 'escalacao'; // vence a classificação leve — humano precisa saber
+          console.log('[escalacao] 🚨 conversa pede humano — intent marcada no painel:', waNumber);
+        }
         await query(`UPDATE thread_state SET intent = $2, updated_at = now() WHERE conversation_id = $1`,
           [conversation.id, intent]);
         const recent = (await query(
@@ -481,7 +497,7 @@ setInterval(async () => {
   } catch (e) { console.error('[lembrete] erro no worker:', e.message); }
 }, 5 * 60 * 1000);
 
-console.log(`[boot] NEON CRM v13.5.6 no ar | provider=${PROVIDER} | AUTO_RESPOND=${process.env.AUTO_RESPOND || '(NÃO definido!)'} | login_painel=${PANEL_USER && PANEL_PASS ? 'ATIVO' : 'desativado'} | janela_IA=${AI_WINDOW[0]}h-${AI_WINDOW[1]}h | opt-out: LIGADO | agenda+lembretes+áudio+métricas: LIGADOS`);
+console.log(`[boot] NEON CRM v13.6.2 no ar | provider=${PROVIDER} | AUTO_RESPOND=${process.env.AUTO_RESPOND || '(NÃO definido!)'} | login_painel=${PANEL_USER && PANEL_PASS ? 'ATIVO' : 'desativado'} | janela_IA=${AI_WINDOW[0]}h-${AI_WINDOW[1]}h | opt-out: LIGADO (palavras-chave) | escalação: LIGADA | agenda+lembretes+áudio+métricas: LIGADOS`);
 app.listen(PORT, () => console.log(`NEON CRM no ar em ${process.env.APP_URL || 'http://localhost:' + PORT}`));
 
 process.on('SIGTERM', () => { pool.end().then(() => process.exit(0)); });
