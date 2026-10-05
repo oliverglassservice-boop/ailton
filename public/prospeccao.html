@@ -10,9 +10,11 @@
 body{font-family:Segoe UI,system-ui,sans-serif;background:#faf9fc;color:#2d2a35;padding:18px}
 header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px}
 h1{font-size:20px;color:var(--purple)}
+h1 small{font-size:12px;color:#8b849c;font-weight:normal}
 .badge{font-size:12px;padding:4px 10px;border-radius:20px;background:#eee}
 .badge.on{background:#e2f4ec;color:var(--green);font-weight:bold}
 .badge.off{background:#fbe9ec;color:var(--red)}
+#errbar{display:none;background:#FDECEC;border:1px solid #E8B4B4;color:#8F1D1D;padding:10px 14px;border-radius:10px;margin-bottom:14px;font-size:13px;cursor:pointer}
 .card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px}
 h2{font-size:14px;color:var(--purple);margin-bottom:8px}
 .row{display:flex;gap:8px;flex-wrap:wrap}
@@ -32,16 +34,19 @@ td{padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
 .stat{flex:1;min-width:100px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px 14px;text-align:center}
 .stat b{font-size:22px;color:var(--purple);display:block}
 #cands div{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px}
+footer{margin-top:18px;text-align:center;color:#b9b3c6;font-size:11px}
 </style>
 </head>
 <body>
 <header>
-  <h1>🎯 Prospecção Ativa — Mais Automação</h1>
+  <h1>🎯 Prospecção Ativa — Mais Automação <small>· v13.1</small></h1>
   <div class="row">
     <span id="statusBadge" class="badge off">PARADO</span>
     <button id="btnToggle" onclick="toggleRun()" class="green">Iniciar disparo</button>
   </div>
 </header>
+
+<div id="errbar" onclick="this.style.display='none'" title="Clique para fechar"></div>
 
 <div class="stats" id="stats"></div>
 
@@ -81,10 +86,22 @@ td{padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
   <p class="muted" style="margin-top:8px">Respostas dos leads chegam na aba WhatsApp do painel principal — feche você mesmo, é a parte humana que vende. 😉</p>
 </div>
 
+<footer>Mais Automação · Prospecção Ativa v13.1 — se você NÃO lê "v13.1" aqui embaixo depois do Deploy, o navegador está servindo a página velha: Ctrl+Shift+R.</footer>
+
 <script>
+/* --- barra de erros VISÍVEIS: nada falha mais em silêncio --- */
+function showErr(msg){
+  const b = document.getElementById('errbar');
+  b.style.display = 'block';
+  b.textContent = '⚠ ' + new Date().toLocaleTimeString('pt-BR') + ' — ' + msg + '  (clique para fechar)';
+  console.error('[prospeccao]', msg);
+}
+
+/* O servidor aceita o login do painel (Basic Auth) OU ?secret= na URL.
+   Nada mais precisa ser colado no endereço para o painel funcionar. */
 const secret = new URLSearchParams(location.search).get('secret') || '';
 const j = async (url, body) => {
-  const r = await fetch(url + '?secret=' + secret, body ? {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)} : undefined);
+  const r = await fetch(url + (secret ? '?secret=' + secret : ''), body ? {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)} : undefined);
   const txt = await r.text();
   let d;
   try { d = JSON.parse(txt); }
@@ -95,17 +112,19 @@ const j = async (url, body) => {
 let lastCandidates = [];
 
 async function loadStatus(){
-  const s = await j('/api/prospect/status');
-  document.getElementById('statusBadge').textContent = s.running ? 'DISPARANDO' : 'PARADO';
-  document.getElementById('statusBadge').className = 'badge ' + (s.running ? 'on' : 'off');
-  document.getElementById('btnToggle').textContent = s.running ? 'Parar disparo' : 'Iniciar disparo';
-  document.getElementById('btnToggle').className = s.running ? 'red' : 'green';
-  if (document.getElementById('tpl').value.trim() === '') document.getElementById('tpl').value = s.template;
-  const c = s.counts || {};
-  document.getElementById('stats').innerHTML =
-    stat('Novos', c.novo||0) + stat('Na fila', c.fila||0) + stat('Enviados', c.enviado||0) +
-    stat('Responderam', c.respondeu||0) + stat('Hoje', s.sent_today + '/' + s.daily_cap) +
-    stat('Janela', s.within_hours ? '✅ aberta' : '⏰ fechada');
+  try{
+    const s = await j('/api/prospect/status');
+    document.getElementById('statusBadge').textContent = s.running ? 'DISPARANDO' : 'PARADO';
+    document.getElementById('statusBadge').className = 'badge ' + (s.running ? 'on' : 'off');
+    document.getElementById('btnToggle').textContent = s.running ? 'Parar disparo' : 'Iniciar disparo';
+    document.getElementById('btnToggle').className = s.running ? 'red' : 'green';
+    if (document.getElementById('tpl').value.trim() === '') document.getElementById('tpl').value = s.template;
+    const c = s.counts || {};
+    document.getElementById('stats').innerHTML =
+      stat('Novos', c.novo||0) + stat('Na fila', c.fila||0) + stat('Enviados', c.enviado||0) +
+      stat('Responderam', c.respondeu||0) + stat('Hoje', s.sent_today + '/' + s.daily_cap) +
+      stat('Janela', s.within_hours ? '✅ aberta' : '⏰ fechada');
+  }catch(e){ showErr('Status: '+e.message); }
 }
 const stat = (l,v) => `<div class="stat"><b>${v}</b>${l}</div>`;
 
@@ -116,43 +135,48 @@ async function search(){
   btn.disabled = true; btn.textContent = 'Buscando…';
   try {
     const r = await j('/api/prospect/search', {query:q});
-    lastCandidates = r.candidates;
-  document.getElementById('cands').innerHTML = r.candidates.map((c,i)=>
-    `<div><input type="checkbox" ${c.ja_importado||!c.phone?'disabled':''} data-i="${i}" ${c.ja_importado||!c.phone?'':'checked'}>
-     <b>${esc(c.name)}</b> <span class="muted">${esc(c.address||'')}</span>
-     ${c.phone?`<span class="tag">${c.phone}</span>`:'<span class="tag optout">sem telefone</span>'}
-     ${c.ja_importado?'<span class="tag respondeu">já importado</span>':''}</div>`).join('');
-  } catch (e) { alert('Falha na busca: ' + e.message); }
+    lastCandidates = r.candidates || [];
+    if (!lastCandidates.length) showErr('A busca voltou vazia — tente outro termo (ex.: "barbearia em Aracaju").');
+    document.getElementById('cands').innerHTML = lastCandidates.map((c,i)=>
+      `<div><input type="checkbox" ${c.ja_importado||!c.phone?'disabled':''} data-i="${i}" ${c.ja_importado||!c.phone?'':'checked'}>
+       <b>${esc(c.name)}</b> <span class="muted">${esc(c.address||'')}</span>
+       ${c.phone?`<span class="tag">${c.phone}</span>`:'<span class="tag optout">sem telefone</span>'}
+       ${c.ja_importado?'<span class="tag respondeu">já importado</span>':''}</div>`).join('');
+  } catch (e) { showErr('Busca: ' + e.message); }
   btn.disabled = false; btn.textContent = 'Buscar';
 }
 function esc(s){return (s||'').replace(/[<>&]/g, m=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[m]))}
 
 async function importSel(){
-  const sel = [...document.querySelectorAll('#cands input:checked')].map(cb => lastCandidates[cb.dataset.i]);
-  if (!sel.length) return alert('Selecione ao menos um lead');
-  const r = await j('/api/prospect/import', {leads:sel, source_query:document.getElementById('q').value});
-  alert(`Importados: ${r.imported ?? r.error}`);
-  loadLeads(); loadStatus();
+  try{
+    const sel = [...document.querySelectorAll('#cands input:checked')].map(cb => lastCandidates[cb.dataset.i]);
+    if (!sel.length) return alert('Selecione ao menos um lead');
+    const r = await j('/api/prospect/import', {leads:sel, source_query:document.getElementById('q').value});
+    alert(`Importados: ${r.imported ?? r.error}`);
+    loadLeads(); loadStatus();
+  }catch(e){ showErr('Importar: '+e.message); }
 }
 
-async function enqueueAll(){ await j('/api/prospect/enqueue-all', {}); loadLeads(); loadStatus(); }
-async function action(id, a){ await j(`/api/prospect/leads/${id}/action`, {action:a}); loadLeads(); loadStatus(); }
-async function toggleRun(){ await j('/api/prospect/control', {action: document.getElementById('statusBadge').textContent==='DISPARANDO'?'stop':'start'}); loadStatus(); }
-async function saveTpl(){ const r = await j('/api/prospect/template', {template: document.getElementById('tpl').value}); alert(r.ok?'Mensagem salva!':r.error); }
+async function enqueueAll(){ try{ await j('/api/prospect/enqueue-all', {}); loadLeads(); loadStatus(); }catch(e){ showErr('Fila: '+e.message); } }
+async function action(id, a){ try{ await j(`/api/prospect/leads/${id}/action`, {action:a}); loadLeads(); loadStatus(); }catch(e){ showErr('Ação: '+e.message); } }
+async function toggleRun(){ try{ await j('/api/prospect/control', {action: document.getElementById('statusBadge').textContent==='DISPARANDO'?'stop':'start'}); loadStatus(); }catch(e){ showErr('Disparo: '+e.message); } }
+async function saveTpl(){ try{ const r = await j('/api/prospect/template', {template: document.getElementById('tpl').value}); alert(r.ok?'Mensagem salva!':r.error); }catch(e){ showErr('Mensagem: '+e.message); } }
 
 async function loadLeads(){
-  const r = await j('/api/prospect/leads');
-  document.getElementById('leads').innerHTML = r.map(l=>`<tr>
-    <td><b>${esc(l.name)}</b><br><span class="muted">${esc((l.address||'').slice(0,50))}</span></td>
-    <td>${esc((l.category||'').replace(/ em aracaju.*/i,''))}</td>
-    <td>${esc(l.phone)}</td>
-    <td><span class="tag ${l.status}">${l.status}</span></td>
-    <td>${l.sent_count}</td>
-    <td class="row">
-      ${l.status==='novo'?`<button onclick="action(${l.id},'enfileirar')">Fila</button>`:''}
-      ${l.status==='enviado'?`<button class="gray" onclick="action(${l.id},'respondeu')">Respondeu</button>`:''}
-      ${(l.status!=='optout'&&l.status!=='descartado')?`<button class="red" onclick="action(${l.id},'optout')">Opt-out</button>`:''}
-    </td></tr>`).join('') || '<tr><td colspan="6" class="muted">Nenhum lead ainda — comece pela busca acima.</td></tr>';
+  try{
+    const r = await j('/api/prospect/leads');
+    document.getElementById('leads').innerHTML = r.map(l=>`<tr>
+      <td><b>${esc(l.name)}</b><br><span class="muted">${esc((l.address||'').slice(0,50))}</span></td>
+      <td>${esc((l.category||'').replace(/ em aracaju.*/i,''))}</td>
+      <td>${esc(l.phone)}</td>
+      <td><span class="tag ${l.status}">${l.status}</span></td>
+      <td>${l.sent_count}</td>
+      <td class="row">
+        ${l.status==='novo'?`<button onclick="action(${l.id},'enfileirar')">Fila</button>`:''}
+        ${l.status==='enviado'?`<button class="gray" onclick="action(${l.id},'respondeu')">Respondeu</button>`:''}
+        ${(l.status!=='optout'&&l.status!=='descartado')?`<button class="red" onclick="action(${l.id},'optout')">Opt-out</button>`:''}
+      </td></tr>`).join('') || '<tr><td colspan="6" class="muted">Nenhum lead ainda — comece pela busca acima.</td></tr>';
+  }catch(e){ showErr('Leads: '+e.message); }
 }
 
 loadStatus(); loadLeads();
