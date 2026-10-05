@@ -151,7 +151,12 @@ pre{white-space:pre-wrap;font-family:inherit;font-size:13px;line-height:1.5}
     <div class="card">
       <h2>3 · Fila de leads</h2>
       <div class="inner">
-        <div class="row" style="margin-bottom:10px"><button class="btn" id="btnEnqueue">Colocar todos os novos na fila</button></div>
+        <div class="row" style="margin-bottom:10px">
+          <button class="btn" id="btnEnqueue">Colocar todos os novos na fila</button>
+          <input type="text" id="testName" placeholder="Nome do lead de teste (ex.: Ailton - celular)">
+          <input type="text" id="testPhone" placeholder="Telefone: 55 + DDD + número">
+          <button class="btn btn-ai" id="btnAddTest">+ Adicionar lead de teste</button>
+        </div>
         <div style="overflow:auto">
           <table>
             <thead><tr><th>Lead</th><th>Categoria</th><th>Telefone</th><th>Status</th><th>Enviados</th><th>Ações</th></tr></thead>
@@ -370,6 +375,19 @@ async function loadLeads(){
 }
 
 async function act(id, a){ try{ await j(`/api/prospect/leads/${id}/action`,{body:{action:a}}); loadLeads(); loadStatus(); }catch(e){ showErr('Ação: '+e.message); } }
+
+async function addTestLead(){
+  const name = $('#testName').value.trim();
+  const phone = $('#testPhone').value.replace(/\D/g,'');
+  if(!name||!phone) return alert('Preencha nome e telefone (55 + DDD + número)');
+  try{
+    await j('/api/prospect/leads/manual',{body:{name, phone}});
+    $('#testName').value=''; $('#testPhone').value='';
+    loadLeads(); loadStatus();
+  }catch(e){ showErr('Lead de teste: '+e.message); }
+}
+$('#btnAddTest').onclick = addTestLead;
+
 async function enqueueAll(){ try{ await j('/api/prospect/enqueue-all',{body:{}}); loadLeads(); loadStatus(); }catch(e){ showErr('Fila: '+e.message); } }
 async function toggleRun(){
   try{
