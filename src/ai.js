@@ -19,6 +19,8 @@
  *       português informal ("vc", "qnto", "kkk"), links suspeitos, sorteio
  *       falso, concorrência + detetores puros detectOptOut()/detectEscalation()
  *       (o webhook passa a usá-los na v13.6.2).
+ * v13.6.3: detectEscalation pega também "atrasou/atraso" — a bateria interna
+ *       (34 casos com as frases do testador) pegou a falha; 34/34 aprovados.
  */
 import OpenAI from 'openai';
 
@@ -305,5 +307,5 @@ export function detectEscalation(text) {
     .replace(/\s+/g, ' ')
     .trim();
   if (!t) return false;
-  return /pessoa de verdade|pessoas de verdade|humano de verdade|atendente humana|falar com (um|uma|o|a) (humano|pessoa|gerente|dono|responsavel|vendedor|supervisor)|\bgerente\b|\bprocon\b|advogad|dinheiro de volta|\bgolpe\b|\broubo\b|processar|cancelar meu pedido|pedido atrasad|encomenda atrasad|trincad|quebrad|com defeito|produto errado|diferente do que pedi|diferente do que eu pedi|concorrente/i.test(t);
+  return /pessoa de verdade|pessoas de verdade|humano de verdade|atendente humana|falar com (um|uma|o|a) (humano|pessoa|gerente|dono|responsavel|vendedor|supervisor)|\bgerente\b|\bprocon\b|advogad|dinheiro de volta|\bgolpe\b|\broubo\b|processar|cancelar meu pedido|pedido atrasad|encomenda atrasad|trincad|quebrad|com defeito|produto errado|diferente do que pedi|diferente do que eu pedi|atrasou|atraso|concorrente/i.test(t);
 }
