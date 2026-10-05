@@ -12,6 +12,8 @@
  *        número que pediu saída (contatos.opt_out).
  * v13.5.2: MODO TESTE — disparo iniciado em modo teste envia SOMENTE para
  *        leads de teste (source_query='teste-manual'), nunca para leads reais.
+ * v13.5.4: SAVE COM UPSERT — a mensagem de abordagem grava mesmo se a linha
+ *        'template' não existir (o UPDATE antigo falhava em silêncio).
  */
 import express from 'express';
 import { query } from './db.js';
@@ -281,8 +283,14 @@ export function mountProspect(app) {
   router.post('/template', async (req, res) => {
     const { template } = req.body;
     if (!template || template.length < 20) return res.status(400).json({ error: 'mensagem muito curta' });
-    await query(`UPDATE prospect_settings SET value=$2 WHERE key='template'`, [template]);
-    res.json({ ok: true });
+    // v13.5.4: UPSERT — grava MESMO se a linha 'template' não existir mais
+    // (o UPDATE antigo afetava 0 linhas em silêncio e fingia que salvou).
+    const r = await query(
+      `INSERT INTO prospect_settings (key, value) VALUES ('template', $1)
+       ON CONFLICT (key) DO UPDATE SET value = $1 RETURNING value`,
+      [template]
+    );
+    res.json({ ok: true, gravados: r.rowCount, caracteres: template.length });
   });
 
   app.use('/api/prospect', router);
