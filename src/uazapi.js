@@ -87,11 +87,13 @@ export async function configureWebhook(url, events = ['messages']) {
  * Baixa a mídia de uma mensagem (áudio/imagem) — POST /message/download,
  * corpo { messageid }, retorno { base64 } (docs.uazapi.com).
  */
-export async function downloadMedia(messageId) {
+export async function downloadMedia(msg) {
+  // v13.3: aceita o objeto msg do webhook OU o id puro (mesmo contrato entre adaptadores).
+  const id = typeof msg === 'string' ? msg : (msg.waMessageId || msg.id || '');
   const res = await fetch(`${BASE}/message/download`, {
     method: 'POST',
     headers: headers(),
-    body: JSON.stringify({ messageid: String(messageId) }),
+    body: JSON.stringify({ messageid: String(id) }),
   });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
