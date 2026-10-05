@@ -4,10 +4,10 @@
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Mais Automação · Atendimento</title>
 <style>
-:root{--ink:#14162A;--paper:#F5F4EF;--card:#fff;--line:#E6E3DA;--muted:#6E7186;--ai:#6B4DF6;--ai-soft:#EFEBFF;--ai-deep:#4C33C9;--green:#0B7A5C;--green-soft:#E2F2EC;--amber:#B97A12;--amber-soft:#FBF1DC;--wa:#0B7A5C}
+:root{--ink:#14162A;--paper:#F5F4EF;--card:#fff;--line:#E6E3DA;--muted:#6E7186;--ai:#6B4DF6;--ai-soft:#EFEBFF;--ai-deep:#4C33C9;--green:#0B7A5C;--green-soft:#E2F2EC;--amber:#B97A12;--amber-soft:#FBF1DC;--wa:#0B7A5C;--red:#C2453A}
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:system-ui,-apple-system,sans-serif;background:var(--paper);color:#22243A;font-size:14px}
-header{background:var(--ink);color:#fff;padding:14px 24px;display:flex;gap:20px;align-items:center}
+header{background:var(--ink);color:#fff;padding:14px 24px;display:flex;gap:20px;align-items:center;flex-wrap:wrap}
 header h1{font-size:17px;font-weight:700;letter-spacing:.05em}
 nav button{background:none;border:none;color:#C9CBDD;font-size:14px;padding:8px 14px;cursor:pointer;border-radius:8px}
 nav button.active{background:#262A52;color:#fff;font-weight:600}
@@ -15,11 +15,14 @@ nav button.active{background:#262A52;color:#fff;font-weight:600}
 main{max-width:1200px;margin:0 auto;padding:24px}
 .view{display:none}.view.active{display:block}
 .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px}
+.kpis5{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:12px}
 .kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 18px}
 .kpi .l{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
 .kpi .v{font-size:24px;font-weight:700;color:var(--ink);margin-top:4px}
+.kpi .s{font-size:11px;color:var(--muted);margin-top:2px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
 .card h2{font-size:14px;padding:14px 18px;border-bottom:1px solid var(--line)}
+.card .inner{padding:14px 18px}
 .empty{padding:18px;color:var(--muted);font-size:13px}
 .kanban{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
 .col{background:#EDECE6;border:1px solid var(--line);border-radius:12px;padding:10px;min-height:120px}
@@ -50,23 +53,35 @@ td{padding:11px 18px;border-bottom:1px solid #EFEDE6;font-size:13px}
 .chat-f{padding:12px 14px;border-top:1px solid var(--line);background:#fff}
 .sugg{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
 .sugg button{background:var(--ai-soft);border:1px solid #DDD4FB;color:var(--ai-deep);font-size:12px;padding:6px 11px;border-radius:18px;cursor:pointer;font-weight:600}
-.row{display:flex;gap:8px}
-.row input{flex:1;border:1px solid var(--line);border-radius:22px;padding:10px 15px;font-size:13.5px;outline:none;background:#F3F1EB}
-.row button{width:40px;height:40px;border-radius:50%;background:var(--wa);color:#fff;border:none;cursor:pointer;font-size:16px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.row input[type=text]{flex:1;min-width:200px;border:1px solid var(--line);border-radius:22px;padding:10px 15px;font-size:13.5px;outline:none;background:#F3F1EB;font-family:inherit}
+.row button.send{width:40px;height:40px;border-radius:50%;background:var(--wa);color:#fff;border:none;cursor:pointer;font-size:16px;flex:none}
+textarea{width:100%;min-height:90px;resize:vertical;border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:13.5px;outline:none;background:#F3F1EB;font-family:inherit}
 .btn{border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer;font-weight:600}
 .btn-ai{background:var(--ai);border-color:var(--ai);color:#fff}
+.btn-green{background:var(--green);border-color:var(--green);color:#fff}
+.btn-red{background:var(--red);border-color:var(--red);color:#fff}
+.btn-gray{background:#8B8FAF;border-color:#8B8FAF;color:#fff}
+.btn:disabled{opacity:.5}
+.tag{font-size:11px;padding:2px 8px;border-radius:10px;background:var(--ai-soft);white-space:nowrap}
+.tag.fila{background:var(--amber-soft)}.tag.enviado{background:var(--green-soft)}.tag.respondeu{background:#DBE9FB}
+.tag.optout,.tag.descartado{background:#eee;color:#888}
+.muted{color:var(--muted);font-size:12px}
+#cands div{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #EFEDE6;font-size:13px}
 summary{cursor:pointer}
 pre{white-space:pre-wrap;font-family:inherit;font-size:13px;line-height:1.5}
-@media(max-width:800px){.kanban{grid-template-columns:1fr}.grid2{grid-template-columns:1fr}.kpis{grid-template-columns:1fr}.msg{max-width:85%}}
+@media(max-width:800px){.kanban{grid-template-columns:1fr}.grid2{grid-template-columns:1fr}.kpis,.kpis5{grid-template-columns:repeat(2,1fr)}.msg{max-width:85%}}
 </style>
 </head>
 <body>
 <header>
-  <h1>◆ Mais Automação <span style="font-size:12px;opacity:.6">atendimento & prospecção · v13.1</span></h1>
+  <h1>◆ Mais Automação <span style="font-size:12px;opacity:.6">atendimento & prospecção · v13.5</span></h1>
   <nav>
     <button data-v="funil" class="active">Funil</button>
     <button data-v="contatos">Contatos</button>
     <button data-v="wa">WhatsApp</button>
+    <button data-v="prosp">Prospecção</button>
+    <button data-v="metricas">Métricas</button>
   </nav>
   <span style="margin-left:auto;font-size:12px;color:#8B8FAF" id="health"></span>
 </header>
@@ -94,143 +109,34 @@ pre{white-space:pre-wrap;font-family:inherit;font-size:13px;line-height:1.5}
         <div class="chat-f">
           <div class="sugg" id="suggRow"></div>
           <div class="row">
-            <input id="msgInput" placeholder="Digite a mensagem…">
-            <button id="sendBtn">➤</button>
+            <input type="text" id="msgInput" placeholder="Digite a mensagem…">
+            <button class="send" id="sendBtn">➤</button>
           </div>
         </div>
       </div>
     </div>
   </section>
-</main>
-<script>
-const $ = s => document.querySelector(s);
-const fmt = c => 'R$ ' + (c/100).toLocaleString('pt-BR');
-const STAGES = {novo:'Novo lead', qualificacao:'Qualificação', proposta:'Proposta', fechamento:'Fechamento'};
-let curThread = null;
-
-/* --- barra de erros VISÍVEIS: nada falha mais em silêncio --- */
-function showErr(msg){
-  const b = $('#errbar');
-  b.style.display = 'block';
-  b.textContent = '⚠ ' + new Date().toLocaleTimeString('pt-BR') + ' — ' + msg + '  (clique para fechar)';
-  console.error('[painel]', msg);
-}
-
-/* --- abas blindadas: se uma view faltar, avisa em vez de quebrar --- */
-document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
-  document.querySelectorAll('nav button, .view').forEach(x => x.classList.remove('active'));
-  b.classList.add('active');
-  const v = $('#v-'+b.dataset.v);
-  if (v) v.classList.add('active');
-  else showErr('Seção "'+b.dataset.v+'" não encontrada na página.');
-});
-
-async function j(url, opt) {
-  const r = await fetch(url, opt && {method:opt.method||'POST',headers:{'Content-Type':'application/json'},body:opt.body?JSON.stringify(opt.body):undefined});
-  const txt = await r.text();
-  try { return JSON.parse(txt); }
-  catch(e){ throw new Error('HTTP '+r.status+' em '+url+' — '+txt.slice(0,90)); }
-}
-
-async function loadFunil(){
-  try{
-    const deals = await j('/api/deals',{method:'GET'});
-    const open = deals.filter(d=>!['ganho','perdido'].includes(d.stage));
-    $('#k-deals').textContent = open.length;
-    $('#k-pipe').textContent = fmt(open.reduce((s,d)=>s+Number(d.value_cents||0),0));
-    $('#k-weighted').textContent = fmt(open.reduce((s,d)=>s+Number(d.value_cents||0)*(d.probability||0)/100,0));
-    const kb = $('#kanban'); kb.innerHTML='';
-    if (!open.length){ kb.innerHTML = '<div class="card empty">Nenhum negócio aberto ainda — os leads aparecem aqui. 💜</div>'; return; }
-    for (const st of Object.keys(STAGES)){
-      const col = document.createElement('div'); col.className='col';
-      col.innerHTML = `<b>${STAGES[st]} · ${open.filter(d=>d.stage===st).length}</b>`;
-      open.filter(d=>d.stage===st).forEach(d=>{
-        const el = document.createElement('button'); el.className='deal';
-        el.innerHTML = `<span class="p">${d.probability||0}%</span><b>${d.title}</b><small>${d.contact_name||''} · ${d.company||''}</small><span class="v">${fmt(d.value_cents)}</span>`;
-        el.onclick = async () => {
-          const next = Object.keys(STAGES)[(Object.keys(STAGES).indexOf(d.stage)+1) % Object.keys(STAGES).length];
-          if (confirm(`Mover "${d.title}" para ${STAGES[next]}?`)) { await j(`/api/deals/${d.id}`,{body:{stage:next}}); loadFunil(); }
-        };
-        col.appendChild(el);
-      });
-      kb.appendChild(col);
-    }
-  }catch(e){ showErr('Funil: '+e.message); }
-}
-
-async function loadContatos(){
-  try{
-    const cs = await j('/api/contacts',{method:'GET'});
-    const tb = $('#contactsBody'); tb.innerHTML='';
-    if (!cs.length){ tb.innerHTML = '<tr><td colspan="5" class="empty">Nenhum contato ainda — converse pelo WhatsApp ou cace leads na aba Prospecção. 💜</td></tr>'; return; }
-    cs.forEach(c=>{ tb.innerHTML += `<tr><td><b>${c.name}</b></td><td>${c.company||''}</td>
-      <td><span style="color:${c.score>=70?'var(--green)':c.score>=45?'var(--amber)':'#C2453A'};font-weight:700">${c.score}</span></td>
-      <td>${c.wa_id||'—'}</td><td>${c.status}</td></tr>`; });
-  }catch(e){ showErr('Contatos: '+e.message); }
-}
-
-async function loadThreads(){
-  try{
-    const ts = await j('/api/threads',{method:'GET'});
-    const box = $('#threadList'); box.innerHTML='<h2>Conversas</h2>';
-    if (!ts.length){ box.innerHTML += '<div class="empty">Nenhuma conversa ainda — mande uma mensagem do celular para o número da instância e ela aparece aqui. 💬</div>'; return; }
-    ts.forEach(t=>{
-      const b = document.createElement('button'); b.className='thread'+(t.id===curThread?' active':'');
-      b.innerHTML = `<b>${t.name}</b> <span style="color:var(--ai-deep);font-weight:700">· ${t.score}</span>
-        ${t.unread?`<span style="float:right;background:var(--wa);color:#fff;border-radius:9px;padding:0 7px;font-size:11px;font-weight:700">${t.unread}</span>`:''}
-        <small>${(t.last_body||'sem mensagens').slice(0,60)}</small>`;
-      b.onclick = () => openThread(t.id, t);
-      box.appendChild(b);
-    });
-  }catch(e){ showErr('Conversas: '+e.message); }
-}
-
-async function openThread(id, t){
-  curThread = id;
-  $('#chatPane').style.display='flex';
-  $('#chatName').textContent = t.name;
-  $('#chatMeta').textContent = `${t.company||''} · score ${t.score} · ${t.tone||'tom: —'}`;
-  $('#suggRow').innerHTML = '';
-  const msgs = await j(`/api/threads/${id}/messages`,{method:'GET'});
-  const cb = $('#chatBody'); cb.innerHTML='';
-  if (t.summary){ const d=document.createElement('div'); d.className='ai-box'; d.innerHTML=`<b>Resumo IA (turno)</b><pre>${t.summary}</pre>`; cb.appendChild(d); }
-  if (t.next_suggestion){ addSugg(t.next_suggestion, t.suggestion_reason); }
-  msgs.forEach(m=>{
-    const d=document.createElement('div'); d.className='msg '+m.direction+(m.kind==='audio'?' audio':'');
-    d.textContent = (m.kind==='audio'?'🎤 ':'')+m.body; cb.appendChild(d);
-  });
-  cb.scrollTop = cb.scrollHeight;
-  loadThreads();
-}
-
-function addSugg(text, reason){
-  const row = $('#suggRow'); row.innerHTML='';
-  const b = document.createElement('button'); b.textContent = '✨ ' + text.slice(0,60);
-  b.onclick = () => { $('#msgInput').value = text; $('#msgInput').focus(); };
-  row.appendChild(b);
-  if (reason){ const s=document.createElement('small'); s.style.color='var(--muted)'; s.textContent=reason; row.appendChild(s); }
-}
-
-$('#sendBtn').onclick = async () => {
-  const text = $('#msgInput').value.trim(); if(!text||!curThread) return;
-  $('#msgInput').value='';
-  try{
-    await j('/api/messages/send',{body:{conversation_id:curThread, text}});
-    const t = (await j('/api/threads',{method:'GET'})).find(x=>x.id===curThread);
-    openThread(curThread, t);
-  }catch(e){ showErr('Enviar: '+e.message); }
-};
-$('#msgInput').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#sendBtn').click(); });
-
-// polling leve: novas sugestões de IA + threads
-setInterval(async ()=>{ try{ await loadThreads(); if(curThread){ const t=(await j('/api/threads',{method:'GET'})).find(x=>x.id===curThread); if(t&&t.next_suggestion) addSugg(t.next_suggestion,t.suggestion_reason);} }catch(e){/* polling silencioso */} }, 8000);
-
-(async ()=>{ try{
-    await Promise.all([loadFunil(), loadContatos(), loadThreads()]);
-    const h = await j('/api/health',{method:'GET'});
-    $('#health').textContent = h.ok ? '● conectado' : '● offline';
-  }catch(e){ showErr('Carga inicial: '+e.message); $('#health').textContent = '● offline'; }
-})();
-</script>
-</body>
-</html>
+  <section class="view" id="v-prosp">
+    <div class="kpis" style="margin-bottom:14px">
+      <div class="kpi" style="display:flex;align-items:center;gap:12px;grid-column:1/-1">
+        <span class="tag off" id="statusBadge" style="font-size:12px;padding:4px 10px">PARADO</span>
+        <button class="btn btn-green" id="btnToggle">Iniciar disparo</button>
+        <span class="muted" id="prospWindow"></span>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:14px">
+      <h2>1 · Buscar negócios no Google</h2>
+      <div class="inner">
+        <div class="row">
+          <input type="text" id="q" placeholder='ex.: "salão de beleza em Aracaju" ou "bares em Aracaju"'>
+          <button class="btn btn-ai" id="btnSearch">Buscar</button>
+        </div>
+        <div id="cands" style="margin-top:10px"></div>
+        <div class="row" style="margin-top:10px">
+          <button class="btn" id="btnImport">Importar selecionados (com telefone)</button>
+          <span class="muted">5.000 buscas/mês grátis no plano atual do Google — use sem medo.</span>
+        </div>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:14px">
+      <h2>2 · Mensagem de abordagem (use {nome} e {categoria}) — rodapé de opt-out é adicion
