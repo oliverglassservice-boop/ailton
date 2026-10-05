@@ -75,7 +75,7 @@ pre{white-space:pre-wrap;font-family:inherit;font-size:13px;line-height:1.5}
 </head>
 <body>
 <header>
-  <h1>◆ Mais Automação <span style="font-size:12px;opacity:.6">atendimento & prospecção · v13.5</span></h1>
+  <h1>◆ Mais Automação <span style="font-size:12px;opacity:.6">atendimento & prospecção · v13.5.3</span></h1>
   <nav>
     <button data-v="funil" class="active">Funil</button>
     <button data-v="contatos">Contatos</button>
@@ -392,7 +392,9 @@ $('#btnAddTest').onclick = addTestLead;
 async function enqueueAll(){ try{ await j('/api/prospect/enqueue-all',{body:{}}); loadLeads(); loadStatus(); }catch(e){ showErr('Fila: '+e.message); } }
 async function toggleRun(){
   try{
-    await j('/api/prospect/control',{body:{action: $('#statusBadge').textContent==='DISPARANDO'?'stop':'start'}});
+    const starting = $('#statusBadge').textContent !== 'DISPARANDO';
+    if (starting && !confirm('DISPARO REAL: vai enviar para TODOS os leads na fila (inclui os do Google). Se a intenção era testar, use o botão 🧪. Continuar?')) return;
+    await j('/api/prospect/control',{body:{action: starting?'start':'stop'}});
     loadStatus();
   }catch(e){ showErr('Disparo: '+e.message); }
 }
@@ -406,7 +408,7 @@ async function runTest(){
 async function saveTpl(){
   try{
     const r = await j('/api/prospect/template',{body:{template: $('#tpl').value}});
-    alert(r.ok?'Mensagem salva!':r.error);
+    alert(r.ok ? 'Mensagem salva no servidor! ✅ Para conferir: esvazia o campo e clica em Recarregar — deve voltar exatamente esta mensagem.' : r.error);
   }catch(e){ showErr('Mensagem: '+e.message); }
 }
 $('#btnSearch').onclick = search;
@@ -415,7 +417,13 @@ $('#btnEnqueue').onclick = enqueueAll;
 $('#btnToggle').onclick = toggleRun;
 $('#btnTest').onclick = runTest;
 $('#btnTpl').onclick = saveTpl;
-$('#btnReloadProsp').onclick = () => { loadStatus(); loadLeads(); };
+$('#btnReloadProsp').onclick = async () => {
+  try{
+    const s = await j('/api/prospect/status',{method:'GET'});
+    $('#tpl').value = s.template; // força: mostra EXATAMENTE o que o servidor tem guardado
+    loadLeads(); loadStatus();
+  }catch(e){ showErr('Recarregar: '+e.message); }
+};
 
 /* ================= MÉTRICAS (aba v13.5) ================= */
 const PROSP_LABELS = {novo:'Novos (importados)', fila:'Na fila', enviado:'Enviados', respondeu:'Responderam', optout:'Opt-out (sairam)', descartado:'Descartados'};
