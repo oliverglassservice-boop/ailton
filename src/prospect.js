@@ -16,6 +16,11 @@
  *        'template' não existir (o UPDATE antigo falhava em silêncio).
  * v13.5.5: LIMPAR TESTES — botão que apaga TODOS os leads de teste (nunca os
  *        reais) + lead de teste já nasce na fila (adicionou = pronto p/ 🧪).
+ * v13.7.2: PS de opt-out REMOVIDO do texto do disparo (a pedido) — o opt-out
+ *        segue 100% ativo por palavras-chave no webhook (server.js).
+ * v13.7.3: TEMPLATE_DEFAULT reescrito — direto, explicativo, com a promessa
+ *        certa (atendente de IA no número do cliente, responde em segundos,
+ *        24h, tira dúvidas e agenda sozinha) + convite fácil de responder.
  */
 import express from 'express';
 import { query } from './db.js';
@@ -29,9 +34,11 @@ const SECRET = process.env.PROSPECT_SECRET || '';
 const DAILY_CAP = Number(process.env.PROSPECT_DAILY_CAP || 40);
 const WINDOW = (process.env.PROSPECT_WINDOW || '9-19').split('-').map(Number); // ex.: 9-19
 const TEMPLATE_DEFAULT =
-  'Oi! Tudo bem? Aqui é o Ailton 😊 Trabalho ajudando {categoria} daqui de Aracaju a não perder ' +
-  'mais clientes no WhatsApp — hoje responde o número de vocês quando chega mensagem? ' +
-  'Desenvolvi um sistema que responde na hora e agenda sozinho. Posso te mostrar funcionando em 5 minutinhos?';
+  'Oi! Tudo bem? Sou o Ailton. Ajudo {categoria} a parar de perder clientes no WhatsApp: ' +
+  'a mensagem chega, a resposta demora — e o cliente acaba comprando do concorrente.\n\n' +
+  'Resolvi isso com um sistema que coloca uma atendente de IA no número de vocês: ' +
+  'ela responde em segundos, 24h por dia, tira dúvidas e ainda agenda sozinha.\n\n' +
+  'Quero te mostrar funcionando em 5 minutinhos — é grátis e sem compromisso. Pode ser? 😊';
 
 let running = false;  // em memória: reinício do serviço = disparo parado (seguro)
 let testMode = false; // v13.5.2: modo teste — só leads de teste recebem
@@ -120,9 +127,11 @@ function personalize(template, lead) {
     .replace(/^(melhores |os melhores |principais )/i, '')
     .replace(/ em aracaju.*/i, '');// remove sufixo da busca
   const msg = template.replaceAll('{nome}', lead.name || '').replaceAll('{categoria}', cat.trim());
-  // v13.5: rodapé de opt-out SEMPRE presente (LGPD) — vale até para template
-  // antigo salvo no banco (a pessoa sempre tem como sair da lista).
-  return msg + '\n\nPS: Se preferir não receber mais mensagens minhas, responde "SAIR" que eu te tiro na hora, combinado? 😊';
+  // v13.7.2: rodapé "PS: ... SAIR ..." REMOVIDO a pedido do Ailton (mensagem
+  // de disparo mais limpa). O opt-out CONTINUA valendo por palavras-chave:
+  // "SAIR", "STOP", "não quero mais receber" etc. são detectados pelo webhook
+  // (server.js) e honrados na hora — a proteção LGPD é do sistema, não do texto.
+  return msg;
 }
 
 /* ------------------------- worker de disparo ------------------------- */
