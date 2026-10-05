@@ -35,6 +35,35 @@ export async function sendText(number, text) {
 }
 
 /**
+ * v13.7.4: Envia IMAGEM com legenda — POST /message/sendMedia/{instance},
+ * media = URL pública (a arte do disparo, ex.: proposta B no host da instância).
+ * Robusto entre versões: tenta o formato v2 (media como URL); se a instância
+ * responder erro, refaz no formato v1 (mediatype: 'image'). Mesmo contrato
+ * do sendText: (number, conteúdo) — a legenda é a mensagem do disparo.
+ */
+export async function sendImage(number, mediaUrl, caption = '') {
+  const jid = number.includes('@') ? number : `${number}@s.whatsapp.net`;
+  const base = { number: jid, caption, delay: 800 };
+  let res = await fetch(`${BASE}/message/sendMedia/${INSTANCE}`, {
+    method: 'POST',
+    headers: headers(),
+    body: JSON.stringify({ ...base, media: mediaUrl }),
+  });
+  if (!res.ok) {
+    res = await fetch(`${BASE}/message/sendMedia/${INSTANCE}`, {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({ ...base, mediatype: 'image', media: mediaUrl }),
+    });
+  }
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Evolution sendImage ${res.status}: ${body.slice(0, 200)}`);
+  }
+  return res.json();
+}
+
+/**
  * Normaliza o payload do webhook (messages.upsert) para o formato interno.
  * Envelope Evolution: { event, instance, data: { key: {remoteJid, fromMe, id}, pushName, message: {...} } }
  */
