@@ -139,4 +139,288 @@ pre{white-space:pre-wrap;font-family:inherit;font-size:13px;line-height:1.5}
       </div>
     </div>
     <div class="card" style="margin-bottom:14px">
-      <h2>2 · Mensagem de abordagem (use {nome} e {categoria}) — rodapé de opt-out é adicion
+      <h2>2 · Mensagem de abordagem (use {nome} e {categoria}) — rodapé de opt-out é adicionado automaticamente</h2>
+      <div class="inner">
+        <textarea id="tpl"></textarea>
+        <div class="row" style="margin-top:8px">
+          <button class="btn" id="btnTpl">Salvar mensagem</button>
+          <button class="btn btn-gray" id="btnReloadProsp">Recarregar</button>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>3 · Fila de leads</h2>
+      <div class="inner">
+        <div class="row" style="margin-bottom:10px"><button class="btn" id="btnEnqueue">Colocar todos os novos na fila</button></div>
+        <div style="overflow:auto">
+          <table>
+            <thead><tr><th>Lead</th><th>Categoria</th><th>Telefone</th><th>Status</th><th>Enviados</th><th>Ações</th></tr></thead>
+            <tbody id="leadsBody"></tbody>
+          </table>
+        </div>
+        <p class="muted" style="margin-top:8px">Quem responde "SAIR" sai da lista na hora (opt-out automático, LGPD). As demais respostas chegam na aba WhatsApp — feche você mesmo, é a parte humana que vende. 😉</p>
+      </div>
+    </div>
+  </section>
+  <section class="view" id="v-metricas">
+    <div class="kpis5">
+      <div class="kpi"><div class="l">Contatos</div><div class="v" id="m-contatos">–</div></div>
+      <div class="kpi"><div class="l">Conversas ativas (7d)</div><div class="v" id="m-conv7">–</div></div>
+      <div class="kpi"><div class="l">Taxa de resposta</div><div class="v" id="m-taxa">–</div></div>
+      <div class="kpi"><div class="l">Disparos hoje</div><div class="v" id="m-disparos">–</div></div>
+      <div class="kpi"><div class="l">Agendamentos futuros</div><div class="v" id="m-agend">–</div></div>
+    </div>
+    <div class="kpis">
+      <div class="kpi"><div class="l">Mensagens (7 dias)</div><div class="v" id="m-msgs">–</div><div class="s">recebidas · enviadas</div></div>
+      <div class="kpi"><div class="l">Pipeline aberto</div><div class="v" id="m-pipe">–</div><div class="s" id="m-deals">–</div></div>
+      <div class="kpi"><div class="l">Opt-outs (LGPD)</div><div class="v" id="m-optout">–</div><div class="s">nunca mais recebem automação</div></div>
+    </div>
+    <div class="card">
+      <h2>Prospecção por status</h2>
+      <table>
+        <thead><tr><th>Status</th><th>Leads</th></tr></thead>
+        <tbody id="prospBody"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+const fmt = c => 'R$ ' + (c/100).toLocaleString('pt-BR');
+const STAGES = {novo:'Novo lead', qualificacao:'Qualificação', proposta:'Proposta', fechamento:'Fechamento'};
+let curThread = null;
+let lastCandidates = [];
+
+/* --- barra de erros VISÍVEIS: nada falha mais em silêncio --- */
+function showErr(msg){
+  const b = $('#errbar');
+  b.style.display = 'block';
+  b.textContent = '⚠ ' + new Date().toLocaleTimeString('pt-BR') + ' — ' + msg + '  (clique para fechar)';
+  console.error('[painel]', msg);
+}
+
+/* --- abas blindadas: se uma view faltar, avisa em vez de quebrar --- */
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('nav button, .view').forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+  const v = $('#v-'+b.dataset.v);
+  if (v) v.classList.add('active');
+  else showErr('Seção "'+b.dataset.v+'" não encontrada na página.');
+  if (b.dataset.v === 'prosp'){ loadStatus(); loadLeads(); }
+  if (b.dataset.v === 'metricas') loadMetrics();
+});
+
+async function j(url, opt) {
+  const r = await fetch(url, opt && {method:opt.method||'POST',headers:{'Content-Type':'application/json'},body:opt.body?JSON.stringify(opt.body):undefined});
+  const txt = await r.text();
+  try { return JSON.parse(txt); }
+  catch(e){ throw new Error('HTTP '+r.status+' em '+url+' — '+txt.slice(0,90)); }
+}
+
+async function loadFunil(){
+  try{
+    const deals = await j('/api/deals',{method:'GET'});
+    const open = deals.filter(d=>!['ganho','perdido'].includes(d.stage));
+    $('#k-deals').textContent = open.length;
+    $('#k-pipe').textContent = fmt(open.reduce((s,d)=>s+Number(d.value_cents||0),0));
+    $('#k-weighted').textContent = fmt(open.reduce((s,d)=>s+Number(d.value_cents||0)*(d.probability||0)/100,0));
+    const kb = $('#kanban'); kb.innerHTML='';
+    if (!open.length){ kb.innerHTML = '<div class="card empty">Nenhum negócio aberto ainda — os leads aparecem aqui. 💜</div>'; return; }
+    for (const st of Object.keys(STAGES)){
+      const col = document.createElement('div'); col.className='col';
+      col.innerHTML = `<b>${STAGES[st]} · ${open.filter(d=>d.stage===st).length}</b>`;
+      open.filter(d=>d.stage===st).forEach(d=>{
+        const el = document.createElement('button'); el.className='deal';
+        el.innerHTML = `<span class="p">${d.probability||0}%</span><b>${d.title}</b><small>${d.contact_name||''} · ${d.company||''}</small><span class="v">${fmt(d.value_cents)}</span>`;
+        el.onclick = async () => {
+          const next = Object.keys(STAGES)[(Object.keys(STAGES).indexOf(d.stage)+1) % Object.keys(STAGES).length];
+          if (confirm(`Mover "${d.title}" para ${STAGES[next]}?`)) { await j(`/api/deals/${d.id}`,{body:{stage:next}}); loadFunil(); }
+        };
+        col.appendChild(el);
+      });
+      kb.appendChild(col);
+    }
+  }catch(e){ showErr('Funil: '+e.message); }
+}
+
+async function loadContatos(){
+  try{
+    const cs = await j('/api/contacts',{method:'GET'});
+    const tb = $('#contactsBody'); tb.innerHTML='';
+    if (!cs.length){ tb.innerHTML = '<tr><td colspan="5" class="empty">Nenhum contato ainda — converse pelo WhatsApp ou cace leads na aba Prospecção. 💜</td></tr>'; return; }
+    cs.forEach(c=>{ tb.innerHTML += `<tr><td><b>${c.name}</b>${c.opt_out?' <span class="tag optout">opt-out</span>':''}</td><td>${c.company||''}</td>
+      <td><span style="color:${c.score>=70?'var(--green)':c.score>=45?'var(--amber)':'var(--red)'};font-weight:700">${c.score}</span></td>
+      <td>${c.wa_id||'—'}</td><td>${c.status}</td></tr>`; });
+  }catch(e){ showErr('Contatos: '+e.message); }
+}
+
+async function loadThreads(){
+  try{
+    const ts = await j('/api/threads',{method:'GET'});
+    const box = $('#threadList'); box.innerHTML='<h2>Conversas</h2>';
+    if (!ts.length){ box.innerHTML += '<div class="empty">Nenhuma conversa ainda — mande uma mensagem do celular para o número da instância e ela aparece aqui. 💬</div>'; return; }
+    ts.forEach(t=>{
+      const b = document.createElement('button'); b.className='thread'+(t.id===curThread?' active':'');
+      b.innerHTML = `<b>${t.name}</b> <span style="color:var(--ai-deep);font-weight:700">· ${t.score}</span>
+        ${t.unread?`<span style="float:right;background:var(--wa);color:#fff;border-radius:9px;padding:0 7px;font-size:11px;font-weight:700">${t.unread}</span>`:''}
+        <small>${(t.last_body||'sem mensagens').slice(0,60)}</small>`;
+      b.onclick = () => openThread(t.id, t);
+      box.appendChild(b);
+    });
+  }catch(e){ showErr('Conversas: '+e.message); }
+}
+
+async function openThread(id, t){
+  curThread = id;
+  $('#chatPane').style.display='flex';
+  $('#chatName').textContent = t.name;
+  $('#chatMeta').textContent = `${t.company||''} · score ${t.score} · ${t.tone||'tom: —'}`;
+  $('#suggRow').innerHTML = '';
+  const msgs = await j(`/api/threads/${id}/messages`,{method:'GET'});
+  const cb = $('#chatBody'); cb.innerHTML='';
+  if (t.summary){ const d=document.createElement('div'); d.className='ai-box'; d.innerHTML=`<b>Resumo IA (turno)</b><pre>${t.summary}</pre>`; cb.appendChild(d); }
+  if (t.next_suggestion){ addSugg(t.next_suggestion, t.suggestion_reason); }
+  msgs.forEach(m=>{
+    const d=document.createElement('div'); d.className='msg '+m.direction+(m.kind==='audio'?' audio':'');
+    d.textContent = (m.kind==='audio'?'🎤 ':'')+m.body; cb.appendChild(d);
+  });
+  cb.scrollTop = cb.scrollHeight;
+  loadThreads();
+}
+
+function addSugg(text, reason){
+  const row = $('#suggRow'); row.innerHTML='';
+  const b = document.createElement('button'); b.textContent = '✨ ' + text.slice(0,60);
+  b.onclick = () => { $('#msgInput').value = text; $('#msgInput').focus(); };
+  row.appendChild(b);
+  if (reason){ const s=document.createElement('small'); s.style.color='var(--muted)'; s.textContent=reason; row.appendChild(s); }
+}
+
+$('#sendBtn').onclick = async () => {
+  const text = $('#msgInput').value.trim(); if(!text||!curThread) return;
+  $('#msgInput').value='';
+  try{
+    await j('/api/messages/send',{body:{conversation_id:curThread, text}});
+    const t = (await j('/api/threads',{method:'GET'})).find(x=>x.id===curThread);
+    openThread(curThread, t);
+  }catch(e){ showErr('Enviar: '+e.message); }
+};
+$('#msgInput').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#sendBtn').click(); });
+
+/* ================= PROSPECÇÃO (aba unificada v13.5) ================= */
+function esc(s){return (s||'').replace(/[<>&]/g, m=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[m]))}
+
+async function loadStatus(){
+  try{
+    const s = await j('/api/prospect/status',{method:'GET'});
+    const badge = $('#statusBadge');
+    badge.textContent = s.running ? 'DISPARANDO' : 'PARADO';
+    badge.style.background = s.running ? 'var(--green-soft)' : '#FDECEC';
+    badge.style.color = s.running ? 'var(--green)' : 'var(--red)';
+    $('#btnToggle').textContent = s.running ? 'Parar disparo' : 'Iniciar disparo';
+    $('#btnToggle').className = 'btn ' + (s.running ? 'btn-red' : 'btn-green');
+    $('#prospWindow').textContent = `${s.sent_today}/${s.daily_cap} hoje · janela ${s.window} ${s.within_hours?'✅ aberta':'⏰ fechada'}`;
+    if ($('#tpl').value.trim() === '') $('#tpl').value = s.template;
+  }catch(e){ showErr('Status: '+e.message); }
+}
+
+async function search(){
+  const q = $('#q').value.trim();
+  if (!q) return alert('Digite o que buscar');
+  const btn = $('#btnSearch');
+  btn.disabled = true; btn.textContent = 'Buscando…';
+  try {
+    const r = await j('/api/prospect/search',{body:{query:q}});
+    lastCandidates = r.candidates || [];
+    if (!lastCandidates.length) showErr('A busca voltou vazia — tente outro termo (ex.: "barbearia em Aracaju").');
+    $('#cands').innerHTML = lastCandidates.map((c,i)=>
+      `<div><input type="checkbox" ${c.ja_importado||!c.phone?'disabled':''} data-i="${i}" ${c.ja_importado||!c.phone?'':'checked'}>
+       <b>${esc(c.name)}</b> <span class="muted">${esc(c.address||'')}</span>
+       ${c.phone?`<span class="tag">${c.phone}</span>`:'<span class="tag optout">sem telefone</span>'}
+       ${c.ja_importado?'<span class="tag respondeu">já importado</span>':''}</div>`).join('');
+  } catch (e) { showErr('Busca: '+e.message); }
+  btn.disabled = false; btn.textContent = 'Buscar';
+}
+
+async function importSel(){
+  try{
+    const sel = [...document.querySelectorAll('#cands input:checked')].map(cb => lastCandidates[cb.dataset.i]);
+    if (!sel.length) return alert('Selecione ao menos um lead');
+    const r = await j('/api/prospect/import',{body:{leads:sel, source_query:$('#q').value}});
+    alert(`Importados: ${r.imported ?? r.error}`);
+    loadLeads(); loadStatus();
+  }catch(e){ showErr('Importar: '+e.message); }
+}
+
+async function loadLeads(){
+  try{
+    const r = await j('/api/prospect/leads',{method:'GET'});
+    $('#leadsBody').innerHTML = r.map(l=>`<tr>
+      <td><b>${esc(l.name)}</b><br><span class="muted">${esc((l.address||'').slice(0,50))}</span></td>
+      <td>${esc((l.category||'').replace(/ em aracaju.*/i,''))}</td>
+      <td>${esc(l.phone)}</td>
+      <td><span class="tag ${l.status}">${l.status}</span></td>
+      <td>${l.sent_count}</td>
+      <td class="row" style="border:none">
+        ${l.status==='novo'?`<button class="btn" onclick="act(${l.id},'enfileirar')">Fila</button>`:''}
+        ${l.status==='enviado'?`<button class="btn btn-gray" onclick="act(${l.id},'respondeu')">Respondeu</button>`:''}
+        ${(l.status!=='optout'&&l.status!=='descartado')?`<button class="btn btn-red" onclick="act(${l.id},'optout')">Opt-out</button>`:''}
+      </td></tr>`).join('') || '<tr><td colspan="6" class="empty">Nenhum lead ainda — comece pela busca acima. 💜</td></tr>';
+  }catch(e){ showErr('Leads: '+e.message); }
+}
+
+async function act(id, a){ try{ await j(`/api/prospect/leads/${id}/action`,{body:{action:a}}); loadLeads(); loadStatus(); }catch(e){ showErr('Ação: '+e.message); } }
+async function enqueueAll(){ try{ await j('/api/prospect/enqueue-all',{body:{}}); loadLeads(); loadStatus(); }catch(e){ showErr('Fila: '+e.message); } }
+async function toggleRun(){
+  try{
+    await j('/api/prospect/control',{body:{action: $('#statusBadge').textContent==='DISPARANDO'?'stop':'start'}});
+    loadStatus();
+  }catch(e){ showErr('Disparo: '+e.message); }
+}
+async function saveTpl(){
+  try{
+    const r = await j('/api/prospect/template',{body:{template: $('#tpl').value}});
+    alert(r.ok?'Mensagem salva!':r.error);
+  }catch(e){ showErr('Mensagem: '+e.message); }
+}
+$('#btnSearch').onclick = search;
+$('#btnImport').onclick = importSel;
+$('#btnEnqueue').onclick = enqueueAll;
+$('#btnToggle').onclick = toggleRun;
+$('#btnTpl').onclick = saveTpl;
+$('#btnReloadProsp').onclick = () => { loadStatus(); loadLeads(); };
+
+/* ================= MÉTRICAS (aba v13.5) ================= */
+const PROSP_LABELS = {novo:'Novos (importados)', fila:'Na fila', enviado:'Enviados', respondeu:'Responderam', optout:'Opt-out (sairam)', descartado:'Descartados'};
+async function loadMetrics(){
+  try{
+    const m = await j('/api/metrics',{method:'GET'});
+    $('#m-contatos').textContent = m.contatos;
+    $('#m-conv7').textContent = m.conversas_7d;
+    $('#m-taxa').textContent = m.taxa_resposta + '%';
+    $('#m-disparos').textContent = m.disparos_hoje;
+    $('#m-agend').textContent = m.agendamentos_futuros;
+    $('#m-msgs').textContent = `${m.msgs_in_7d} ▼ · ${m.msgs_out_7d} ▲`;
+    $('#m-pipe').textContent = fmt(Number(m.pipeline_cents||0));
+    $('#m-deals').textContent = `${m.deals_abertos} negócios abertos`;
+    $('#m-optout').textContent = m.opt_outs;
+    const p = m.prospeccao||{};
+    $('#prospBody').innerHTML = Object.keys(PROSP_LABELS).map(s=>
+      `<tr><td><span class="tag ${s}">${PROSP_LABELS[s]}</span></td><td><b>${p[s]||0}</b></td></tr>`).join('');
+  }catch(e){ showErr('Métricas: '+e.message); }
+}
+
+// polling leve: novas sugestões de IA + threads + métricas frescas
+setInterval(async ()=>{ try{ await loadThreads(); if(curThread){ const t=(await j('/api/threads',{method:'GET'})).find(x=>x.id===curThread); if(t&&t.next_suggestion) addSugg(t.next_suggestion,t.suggestion_reason);} }catch(e){/* polling silencioso */} }, 8000);
+setInterval(()=>{ try{ loadStatus(); loadMetrics(); }catch(e){} }, 60000);
+
+(async ()=>{ try{
+    await Promise.all([loadFunil(), loadContatos(), loadThreads(), loadStatus(), loadMetrics()]);
+    const h = await j('/api/health',{method:'GET'});
+    $('#health').textContent = h.ok ? '● conectado' : '● offline';
+    if (location.hash === '#prosp') document.querySelector('nav button[data-v="prosp"]').click();
+  }catch(e){ showErr('Carga inicial: '+e.message); $('#health').textContent = '● offline'; }
+})();
+</script>
+</body>
+</html>
