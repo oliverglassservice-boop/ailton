@@ -7,6 +7,8 @@
  * Ailton). Para implantar em um cliente, copie este arquivo para a instância
  * dele e edite BUSINESS + CATALOG com os dados do cliente — a estrutura fica.
  * v13.2: regra de variação contextual de emojis na persona (nada de 💜 fixo).
+ * v13.3: responde todas as perguntas numa única mensagem + reconhece a
+ *       abertura da pessoa (saudação/origem/elogio) antes do conteúdo.
  */
 import OpenAI from 'openai';
 
@@ -138,6 +140,8 @@ export async function suggestReply(messages, contactContext = {}) {
     `${personaPrompt()}
 
      Escreva UMA mensagem de WhatsApp como ${BUSINESS.attendant} respondendo à última mensagem da pessoa.
+     REGRA DE OURO: a pessoa pode mandar várias perguntas de uma vez — responda TODAS em UMA única mensagem, na ordem em que foram perguntadas, com transições naturais de conversa (nunca em várias mensagens).
+     Comece reconhecendo o que a pessoa disse na abertura (saudação, origem, elogio — ex.: "que bom que nos encontrou!") antes de responder ao conteúdo.
      Responda SOMENTE com o texto da mensagem, sem aspas e sem explicação.`,
     `Dados do contato no CRM: ${JSON.stringify(contactContext)}
 
