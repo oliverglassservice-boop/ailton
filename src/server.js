@@ -10,6 +10,9 @@
  * v13.1: HTML sem cache no navegador (acabou o "painel velho" pós-Deploy).
  * v13.2: confirmação de agenda não duplica com a auto-resposta; lembretes
  *       e persona com emojis variados por contexto.
+ * v13.3: ÁUDIO RESPONDE — transcrição segue o fluxo da IA; download de mídia
+ *       com chave completa (Evolution); schema.sql sem dados-demo (não voltam
+ *       mais no Deploy após limpeza).
  */
 import express from 'express';
 import path from 'path';
@@ -227,12 +230,19 @@ async function waWebhook(req, res) {
     }
 
     let body = msg.text;
-    // v12: áudio → baixa mídia + transcreve com Whisper (fallback: placeholder)
+    // v12/v13.3: áudio → baixa mídia + transcreve com Whisper.
+    // v13.3: se transcrever, o áudio SEGUE o fluxo normal da IA (ela responde de volta!).
     if (msg.kind === 'audio' && !body && msg.waMessageId) {
       try {
-        const buf = await wa.downloadMedia(msg.waMessageId);
-        body = (await ai.transcribeAudio(buf)) || '[áudio sem texto]';
-        console.log('[audio] transcrito:', body.slice(0, 60));
+        const buf = await wa.downloadMedia(msg);
+        const txt = (await ai.transcribeAudio(buf)) || '';
+        if (txt.trim()) {
+          body = txt;
+          msg.kind = 'text'; // transcrito → tratado como texto: a IA responde
+          console.log('[audio] transcrito:', body.slice(0, 60));
+        } else {
+          body = '[áudio sem texto]';
+        }
       } catch (e) {
         console.error('[audio] falha ao transcrever:', e.message);
         body = '[áudio recebido]';
@@ -397,7 +407,7 @@ setInterval(async () => {
   } catch (e) { console.error('[lembrete] erro no worker:', e.message); }
 }, 5 * 60 * 1000);
 
-console.log(`[boot] NEON CRM v13.2 no ar | provider=${PROVIDER} | AUTO_RESPOND=${process.env.AUTO_RESPOND || '(NÃO definido!)'} | login_painel=${PANEL_USER && PANEL_PASS ? 'ATIVO' : 'desativado'} | janela_IA=${AI_WINDOW[0]}h-${AI_WINDOW[1]}h | agenda+lembretes+áudio: LIGADOS`);
+console.log(`[boot] NEON CRM v13.3 no ar | provider=${PROVIDER} | AUTO_RESPOND=${process.env.AUTO_RESPOND || '(NÃO definido!)'} | login_painel=${PANEL_USER && PANEL_PASS ? 'ATIVO' : 'desativado'} | janela_IA=${AI_WINDOW[0]}h-${AI_WINDOW[1]}h | agenda+lembretes+áudio: LIGADOS`);
 app.listen(PORT, () => console.log(`NEON CRM no ar em ${process.env.APP_URL || 'http://localhost:' + PORT}`));
 
 process.on('SIGTERM', () => { pool.end().then(() => process.exit(0)); });
