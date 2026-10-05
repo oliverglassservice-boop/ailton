@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS contacts (
   score_reason  TEXT,                           -- fatores explicáveis (SHAP-like)
   status        TEXT DEFAULT 'lead',            -- lead|qualificando|cliente|inativo
   consent_lgpd  BOOLEAN DEFAULT FALSE,          -- opt-in (LGPD)
+  opt_out       BOOLEAN DEFAULT FALSE,          -- v13.5: pediu SAIR — nunca mais recebe automação
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
