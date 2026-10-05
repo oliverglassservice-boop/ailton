@@ -7,7 +7,7 @@
  * Respostas dos leads chegam no inbox normal do CRM (webhook), e o
  * vendedor fecha a conversa manualmente.
  *
- * Autorização: todas as rotas exigem ?secret=PROSPECT_SECRET (Environment).
+ * Autorização: login do painel (Basic Auth) OU ?secret=PROSPECT_SECRET.
  */
 import express from 'express';
 import { query } from './db.js';
@@ -144,6 +144,14 @@ async function tick() {
 /* ------------------------- rotas ------------------------- */
 export function mountProspect(app) {
   const auth = (req, res, next) => {
+    // Liberado se já logou no painel (Basic Auth do navegador) — o painel
+    // funciona pela URL simples, sem precisar de ?secret no endereço.
+    const PANEL_USER = process.env.PANEL_USER || '';
+    const PANEL_PASS = process.env.PANEL_PASS || '';
+    const hdr = req.headers.authorization || '';
+    const basicOk = PANEL_USER && PANEL_PASS && hdr.startsWith('Basic ') &&
+      Buffer.from(hdr.slice(6), 'base64').toString() === `${PANEL_USER}:${PANEL_PASS}`;
+    if (basicOk) return next();
     if (!SECRET) return res.status(500).json({ error: 'PROSPECT_SECRET não configurada' });
     if (req.query.secret !== SECRET) return res.status(401).json({ error: 'forbidden' });
     next();
