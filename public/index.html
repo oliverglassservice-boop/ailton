@@ -75,7 +75,7 @@ pre{white-space:pre-wrap;font-family:inherit;font-size:13px;line-height:1.5}
 </head>
 <body>
 <header>
-  <h1>◆ Mais Automação <span style="font-size:12px;opacity:.6">atendimento & prospecção · v13.5.5</span></h1>
+  <h1>◆ Mais Automação <span style="font-size:12px;opacity:.6">atendimento & prospecção · v13.5.6</span></h1>
   <nav>
     <button data-v="funil" class="active">Funil</button>
     <button data-v="contatos">Contatos</button>
@@ -255,7 +255,7 @@ async function loadContatos(){
     const cs = await j('/api/contacts',{method:'GET'});
     const tb = $('#contactsBody'); tb.innerHTML='';
     if (!cs.length){ tb.innerHTML = '<tr><td colspan="5" class="empty">Nenhum contato ainda — converse pelo WhatsApp ou cace leads na aba Prospecção. 💜</td></tr>'; return; }
-    cs.forEach(c=>{ tb.innerHTML += `<tr><td><b>${c.name}</b>${c.opt_out?' <span class="tag optout">opt-out</span>':''}</td><td>${c.company||''}</td>
+    cs.forEach(c=>{ tb.innerHTML += `<tr><td><b>${c.name}</b>${c.opt_out?` <span class="tag optout">opt-out</span> <button class="btn btn-gray" style="padding:2px 8px;font-size:11px" onclick="reactivate(${c.id})">Reativar</button>`:''}</td><td>${c.company||''}</td>
       <td><span style="color:${c.score>=70?'var(--green)':c.score>=45?'var(--amber)':'var(--red)'};font-weight:700">${c.score}</span></td>
       <td>${c.wa_id||'—'}</td><td>${c.status}</td></tr>`; });
   }catch(e){ showErr('Contatos: '+e.message); }
@@ -377,6 +377,14 @@ async function loadLeads(){
 }
 
 async function act(id, a){ try{ await j(`/api/prospect/leads/${id}/action`,{body:{action:a}}); loadLeads(); loadStatus(); }catch(e){ showErr('Ação: '+e.message); } }
+
+async function reactivate(id){
+  try{
+    if(!confirm('Reativar este contato? Ele volta a receber respostas da IA e disparos (reconsentimento registrado no sistema).')) return;
+    await j(`/api/contacts/${id}/reactivate`,{body:{}});
+    loadContatos(); loadMetrics();
+  }catch(e){ showErr('Reativar: '+e.message); }
+}
 
 async function addTestLead(){
   const name = $('#testName').value.trim();
