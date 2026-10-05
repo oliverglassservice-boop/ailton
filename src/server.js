@@ -1,5 +1,5 @@
 /**
- * NEON CRM — servidor v13.1 (multi-provedor WhatsApp: Evolution API | Uazapi).
+ * NEON CRM — servidor v13.2 (multi-provedor WhatsApp: Evolution API | Uazapi).
  * Núcleo: contatos, deals, inbox WhatsApp, AI Gateway (OpenAI),
  * Prospecção Ativa (Google Places + disparo com guardrails).
  * v11: login no painel (Basic Auth) + persona de vendas + guarda de horário.
@@ -8,6 +8,8 @@
  * v13: WHATSAPP_PROVIDER=evolution|uazapi (padrão: uazapi até migrar).
  *       Webhook aceita /webhooks/evolution e /webhooks/uazapi (mesmo handler).
  * v13.1: HTML sem cache no navegador (acabou o "painel velho" pós-Deploy).
+ * v13.2: confirmação de agenda não duplica com a auto-resposta; lembretes
+ *       e persona com emojis variados por contexto.
  */
 import express from 'express';
 import path from 'path';
@@ -272,7 +274,8 @@ async function waWebhook(req, res) {
         console.log('[ia] sugestão pronta p/ conversa', conversation.id,
           isProspect ? '(persona: vendas Mais Automação)' : '(persona: atendente do negócio)');
 
-        // v12: AGENDA REAL — se a intenção é agendamento, extrai data/hora e grava
+        // v13.2: AGENDA REAL — se a intenção é agendamento, extrai data/hora e grava
+        let apptConfirmed = false; // evita mensagem dupla (confirmação 📅 + auto-resposta)
         if (intent === 'agendamento') {
           const appt = await ai.parseAppointment(recent, contact.name);
           if (appt) {
@@ -291,6 +294,7 @@ async function waWebhook(req, res) {
                 await query(`UPDATE conversations SET last_msg_at = now() WHERE id = $1`, [conversation.id]);
                 try {
                   await wa.sendText(conversation.wa_chat_id, conf);
+                  apptConfirmed = true; // 📅 já saiu — a auto-resposta vira redundante
                   console.log('[agenda] ✅ agendamento gravado e confirmado:', appt.date, appt.time);
                 } catch (e2) {
                   console.error('[agenda] gravado no painel, mas falhou o envio da confirmação:', e2.message);
@@ -301,7 +305,10 @@ async function waWebhook(req, res) {
         }
 
         // ---- AUTO-RESPOSTA (interruptor AUTO_RESPOND=true + janela de horário) ----
-        if ((process.env.AUTO_RESPOND || 'false') === 'true') {
+        // v13.2: se o 📅 de confirmação já saiu, NÃO manda a sugestão também (era a duplicidade)
+        if (apptConfirmed) {
+          console.log('[auto] agendamento já confirmado — auto-resposta dispensada (sem duplicar)');
+        } else if ((process.env.AUTO_RESPOND || 'false') === 'true') {
           if (!withinAiHours()) {
             console.log('[auto] fora da janela de horário — resposta fica como sugestão p/ envio manual');
           } else {
@@ -356,8 +363,8 @@ const PORT = process.env.PORT || 3000;
 await migrate();
 
 /* ---------------- FASE 4: lembretes automáticos (D-1 e 2h antes) ---------------- */
-const REMINDER_D1 = 'Oi! Passando para lembrar do seu horário amanhã 💜 Qualquer imprevisto, me avisa por aqui, tá?';
-const REMINDER_H2 = 'Oi! Seu horário é daqui a 2 horinhas 💜 Já a caminho? Qualquer coisa, me chama!';
+const REMINDER_D1 = 'Oi! Passando para lembrar do seu horário amanhã 📅 Qualquer imprevisto, me avisa por aqui, tá?';
+const REMINDER_H2 = 'Oi! Seu horário é daqui a 2 horas ⏰ Já a caminho? Qualquer coisa, me chama!';
 setInterval(async () => {
   try {
     if (!withinAiHours()) return; // lembretes só na janela social
@@ -390,7 +397,7 @@ setInterval(async () => {
   } catch (e) { console.error('[lembrete] erro no worker:', e.message); }
 }, 5 * 60 * 1000);
 
-console.log(`[boot] NEON CRM v13.1 no ar | provider=${PROVIDER} | AUTO_RESPOND=${process.env.AUTO_RESPOND || '(NÃO definido!)'} | login_painel=${PANEL_USER && PANEL_PASS ? 'ATIVO' : 'desativado'} | janela_IA=${AI_WINDOW[0]}h-${AI_WINDOW[1]}h | agenda+lembretes+áudio: LIGADOS`);
+console.log(`[boot] NEON CRM v13.2 no ar | provider=${PROVIDER} | AUTO_RESPOND=${process.env.AUTO_RESPOND || '(NÃO definido!)'} | login_painel=${PANEL_USER && PANEL_PASS ? 'ATIVO' : 'desativado'} | janela_IA=${AI_WINDOW[0]}h-${AI_WINDOW[1]}h | agenda+lembretes+áudio: LIGADOS`);
 app.listen(PORT, () => console.log(`NEON CRM no ar em ${process.env.APP_URL || 'http://localhost:' + PORT}`));
 
 process.on('SIGTERM', () => { pool.end().then(() => process.exit(0)); });
