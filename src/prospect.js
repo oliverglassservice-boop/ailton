@@ -8,6 +8,8 @@
  * vendedor fecha a conversa manualmente.
  *
  * Autorização: login do painel (Basic Auth) OU ?secret=PROSPECT_SECRET.
+ * v13.5: rodapé de opt-out (LGPD) em TODO disparo + nunca dispara para
+ *        número que pediu saída (contatos.opt_out).
  */
 import express from 'express';
 import { query } from './db.js';
@@ -110,7 +112,10 @@ function personalize(template, lead) {
   const cat = (lead.category || lead.source_query || 'negócio local')
     .replace(/^(melhores |os melhores |principais )/i, '')
     .replace(/ em aracaju.*/i, '');// remove sufixo da busca
-  return template.replaceAll('{nome}', lead.name || '').replaceAll('{categoria}', cat.trim());
+  const msg = template.replaceAll('{nome}', lead.name || '').replaceAll('{categoria}', cat.trim());
+  // v13.5: rodapé de opt-out SEMPRE presente (LGPD) — vale até para template
+  // antigo salvo no banco (a pessoa sempre tem como sair da lista).
+  return msg + '\n\nPS: Se preferir não receber mais mensagens minhas, responde "SAIR" que eu te tiro na hora, combinado? 😊';
 }
 
 /* ------------------------- worker de disparo ------------------------- */
@@ -119,7 +124,14 @@ async function tick() {
     if (!running || !withinBusinessHours()) return;
     if ((await sentToday()) >= DAILY_CAP) return;
     const lead = (await query(
-      `SELECT * FROM prospect_leads WHERE status = 'fila' AND phone <> '' ORDER BY id LIMIT 1`
+      `SELECT l.* FROM prospect_leads l
+        WHERE l.status = 'fila' AND l.phone <> ''
+          AND NOT EXISTS (   -- v13.5: nunca dispara p/ quem pediu SAIR
+            SELECT 1 FROM contacts c
+            WHERE REGEXP_REPLACE(c.wa_id, '\\D', '', 'g') = REGEXP_REPLACE(l.phone, '\\D', '', 'g')
+              AND c.opt_out
+          )
+        ORDER BY l.id LIMIT 1`
     )).rows[0];
     if (!lead) return;
     const text = personalize(await getTemplate(), lead);
