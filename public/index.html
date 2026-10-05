@@ -75,7 +75,7 @@ pre{white-space:pre-wrap;font-family:inherit;font-size:13px;line-height:1.5}
 </head>
 <body>
 <header>
-  <h1>◆ Mais Automação <span style="font-size:12px;opacity:.6">atendimento & prospecção · v13.5.3</span></h1>
+  <h1>◆ Mais Automação <span style="font-size:12px;opacity:.6">atendimento & prospecção · v13.5.5</span></h1>
   <nav>
     <button data-v="funil" class="active">Funil</button>
     <button data-v="contatos">Contatos</button>
@@ -157,6 +157,7 @@ pre{white-space:pre-wrap;font-family:inherit;font-size:13px;line-height:1.5}
           <input type="text" id="testName" placeholder="Nome do lead de teste (ex.: Ailton - celular)">
           <input type="text" id="testPhone" placeholder="Telefone: 55 + DDD + número">
           <button class="btn btn-ai" id="btnAddTest">+ Adicionar lead de teste</button>
+          <button class="btn btn-red" id="btnClearTests">🧹 Limpar leads de teste</button>
         </div>
         <div style="overflow:auto">
           <table>
@@ -164,7 +165,7 @@ pre{white-space:pre-wrap;font-family:inherit;font-size:13px;line-height:1.5}
             <tbody id="leadsBody"></tbody>
           </table>
         </div>
-        <p class="muted" style="margin-top:8px">Quem responde "SAIR" sai da lista na hora (opt-out automático, LGPD). As demais respostas chegam na aba WhatsApp — feche você mesmo, é a parte humana que vende. 😉</p>
+        <p class="muted" style="margin-top:8px">Lead de teste adicionado já cai direto na fila. Quem responde "SAIR" sai da lista na hora (opt-out automático, LGPD). As demais respostas chegam na aba WhatsApp — feche você mesmo, é a parte humana que vende. 😉</p>
       </div>
     </div>
   </section>
@@ -388,6 +389,16 @@ async function addTestLead(){
   }catch(e){ showErr('Lead de teste: '+e.message); }
 }
 $('#btnAddTest').onclick = addTestLead;
+
+async function clearTests(){
+  try{
+    if(!confirm('🧹 Isto APAGA todos os leads com categoria "teste manual" (a lista de teste inteira). Leads reais do Google ficam intocados. Continuar?')) return;
+    const r = await j('/api/prospect/leads/clear-tests',{body:{}});
+    alert(`Leads de teste apagados: ${r.removed}`);
+    loadLeads(); loadStatus();
+  }catch(e){ showErr('Limpar testes: '+e.message); }
+}
+$('#btnClearTests').onclick = clearTests;
 
 async function enqueueAll(){ try{ await j('/api/prospect/enqueue-all',{body:{}}); loadLeads(); loadStatus(); }catch(e){ showErr('Fila: '+e.message); } }
 async function toggleRun(){
