@@ -30,6 +30,8 @@ export async function migrate() {
         await pool.query(sql);
       } else { throw e1; }
     }
+    // v13.5: opt-out (LGPD) — coluna idempotente, funciona até em banco que já existia
+    await pool.query(`ALTER TABLE contacts ADD COLUMN IF NOT EXISTS opt_out BOOLEAN NOT NULL DEFAULT FALSE`);
     console.log('[db] schema aplicado/verificado');
   } catch (e) {
     console.error('[db] FALHA ao aplicar schema — verifique DATABASE_URL:', e.message);
