@@ -204,6 +204,25 @@ export function mountProspect(app) {
     } catch (e) { res.status(500).json({ error: String(e.message) }); }
   });
 
+  router.post('/leads/manual', async (req, res) => {
+    // v13.5.1: lead de TESTE manual — enfileira números próprios para a
+    // prova de fogo do disparo (rodapé, SAIR, resposta) sem tocar em leads reais.
+    try {
+      const { name, phone } = req.body;
+      if (!name || !phone) return res.status(400).json({ error: 'informe nome e telefone' });
+      const digits = String(phone).replace(/\D/g, '');
+      if (digits.length < 10) return res.status(400).json({ error: 'telefone inválido (use 55 + DDD + número)' });
+      const r = await query(
+        `INSERT INTO prospect_leads (place_id, name, category, phone, source_query)
+         VALUES ($1,$2,$3,$4,'teste-manual')
+         ON CONFLICT (place_id) DO UPDATE SET name = $2, phone = $4
+         RETURNING *`,
+        [`manual-${digits}`, name, 'teste manual', digits]
+      );
+      res.json(r.rows[0]);
+    } catch (e) { res.status(500).json({ error: String(e.message) }); }
+  });
+
   router.get('/leads', async (_req, res) => {
     const r = await query(`SELECT * FROM prospect_leads ORDER BY
       CASE status WHEN 'fila' THEN 0 WHEN 'novo' THEN 1 WHEN 'enviado' THEN 2
