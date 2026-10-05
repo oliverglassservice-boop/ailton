@@ -11,6 +11,7 @@ header{background:var(--ink);color:#fff;padding:14px 24px;display:flex;gap:20px;
 header h1{font-size:17px;font-weight:700;letter-spacing:.05em}
 nav button{background:none;border:none;color:#C9CBDD;font-size:14px;padding:8px 14px;cursor:pointer;border-radius:8px}
 nav button.active{background:#262A52;color:#fff;font-weight:600}
+#errbar{display:none;background:#FDECEC;border-bottom:1px solid #E8B4B4;color:#8F1D1D;padding:10px 24px;font-size:13px;cursor:pointer}
 main{max-width:1200px;margin:0 auto;padding:24px}
 .view{display:none}.view.active{display:block}
 .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px}
@@ -19,6 +20,7 @@ main{max-width:1200px;margin:0 auto;padding:24px}
 .kpi .v{font-size:24px;font-weight:700;color:var(--ink);margin-top:4px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
 .card h2{font-size:14px;padding:14px 18px;border-bottom:1px solid var(--line)}
+.empty{padding:18px;color:var(--muted);font-size:13px}
 .kanban{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
 .col{background:#EDECE6;border:1px solid var(--line);border-radius:12px;padding:10px;min-height:120px}
 .col b{font-size:12px;display:block;padding:4px 6px 10px;color:var(--ink)}
@@ -60,13 +62,15 @@ pre{white-space:pre-wrap;font-family:inherit;font-size:13px;line-height:1.5}
 </head>
 <body>
 <header>
-  <h1>◆ Mais Automação <span style="font-size:12px;opacity:.6">atendimento & prospecção</span></h1>
+  <h1>◆ Mais Automação <span style="font-size:12px;opacity:.6">atendimento & prospecção · v13.1</span></h1>
+  <nav>
     <button data-v="funil" class="active">Funil</button>
     <button data-v="contatos">Contatos</button>
     <button data-v="wa">WhatsApp</button>
   </nav>
   <span style="margin-left:auto;font-size:12px;color:#8B8FAF" id="health"></span>
 </header>
+<div id="errbar" onclick="this.style.display='none'" title="Clique para fechar"></div>
 <main>
   <section class="view active" id="v-funil">
     <div class="kpis">
@@ -104,54 +108,81 @@ const fmt = c => 'R$ ' + (c/100).toLocaleString('pt-BR');
 const STAGES = {novo:'Novo lead', qualificacao:'Qualificação', proposta:'Proposta', fechamento:'Fechamento'};
 let curThread = null;
 
+/* --- barra de erros VISÍVEIS: nada falha mais em silêncio --- */
+function showErr(msg){
+  const b = $('#errbar');
+  b.style.display = 'block';
+  b.textContent = '⚠ ' + new Date().toLocaleTimeString('pt-BR') + ' — ' + msg + '  (clique para fechar)';
+  console.error('[painel]', msg);
+}
+
+/* --- abas blindadas: se uma view faltar, avisa em vez de quebrar --- */
 document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
   document.querySelectorAll('nav button, .view').forEach(x => x.classList.remove('active'));
-  b.classList.add('active'); $('#v-'+b.dataset.v).classList.add('active');
+  b.classList.add('active');
+  const v = $('#v-'+b.dataset.v);
+  if (v) v.classList.add('active');
+  else showErr('Seção "'+b.dataset.v+'" não encontrada na página.');
 });
 
-async function j(url, opt) { const r = await fetch(url, opt && {method:opt.method||'POST',headers:{'Content-Type':'application/json'},body:opt.body?JSON.stringify(opt.body):undefined}); return r.json(); }
+async function j(url, opt) {
+  const r = await fetch(url, opt && {method:opt.method||'POST',headers:{'Content-Type':'application/json'},body:opt.body?JSON.stringify(opt.body):undefined});
+  const txt = await r.text();
+  try { return JSON.parse(txt); }
+  catch(e){ throw new Error('HTTP '+r.status+' em '+url+' — '+txt.slice(0,90)); }
+}
 
 async function loadFunil(){
-  const deals = await j('/api/deals',{method:'GET'});
-  const open = deals.filter(d=>!['ganho','perdido'].includes(d.stage));
-  $('#k-deals').textContent = open.length;
-  $('#k-pipe').textContent = fmt(open.reduce((s,d)=>s+Number(d.value_cents||0),0));
-  $('#k-weighted').textContent = fmt(open.reduce((s,d)=>s+Number(d.value_cents||0)*(d.probability||0)/100,0));
-  const kb = $('#kanban'); kb.innerHTML='';
-  for (const st of Object.keys(STAGES)){
-    const col = document.createElement('div'); col.className='col';
-    col.innerHTML = `<b>${STAGES[st]} · ${open.filter(d=>d.stage===st).length}</b>`;
-    open.filter(d=>d.stage===st).forEach(d=>{
-      const el = document.createElement('button'); el.className='deal';
-      el.innerHTML = `<span class="p">${d.probability||0}%</span><b>${d.title}</b><small>${d.contact_name||''} · ${d.company||''}</small><span class="v">${fmt(d.value_cents)}</span>`;
-      el.onclick = async () => {
-        const next = Object.keys(STAGES)[(Object.keys(STAGES).indexOf(d.stage)+1) % Object.keys(STAGES).length];
-        if (confirm(`Mover "${d.title}" para ${STAGES[next]}?`)) { await j(`/api/deals/${d.id}`,{body:{stage:next}}); loadFunil(); }
-      };
-      col.appendChild(el);
-    });
-    kb.appendChild(col);
-  }
+  try{
+    const deals = await j('/api/deals',{method:'GET'});
+    const open = deals.filter(d=>!['ganho','perdido'].includes(d.stage));
+    $('#k-deals').textContent = open.length;
+    $('#k-pipe').textContent = fmt(open.reduce((s,d)=>s+Number(d.value_cents||0),0));
+    $('#k-weighted').textContent = fmt(open.reduce((s,d)=>s+Number(d.value_cents||0)*(d.probability||0)/100,0));
+    const kb = $('#kanban'); kb.innerHTML='';
+    if (!open.length){ kb.innerHTML = '<div class="card empty">Nenhum negócio aberto ainda — os leads aparecem aqui. 💜</div>'; return; }
+    for (const st of Object.keys(STAGES)){
+      const col = document.createElement('div'); col.className='col';
+      col.innerHTML = `<b>${STAGES[st]} · ${open.filter(d=>d.stage===st).length}</b>`;
+      open.filter(d=>d.stage===st).forEach(d=>{
+        const el = document.createElement('button'); el.className='deal';
+        el.innerHTML = `<span class="p">${d.probability||0}%</span><b>${d.title}</b><small>${d.contact_name||''} · ${d.company||''}</small><span class="v">${fmt(d.value_cents)}</span>`;
+        el.onclick = async () => {
+          const next = Object.keys(STAGES)[(Object.keys(STAGES).indexOf(d.stage)+1) % Object.keys(STAGES).length];
+          if (confirm(`Mover "${d.title}" para ${STAGES[next]}?`)) { await j(`/api/deals/${d.id}`,{body:{stage:next}}); loadFunil(); }
+        };
+        col.appendChild(el);
+      });
+      kb.appendChild(col);
+    }
+  }catch(e){ showErr('Funil: '+e.message); }
 }
 
 async function loadContatos(){
-  const cs = await j('/api/contacts',{method:'GET'});
-  $('#contactsBody').innerHTML = cs.map(c=>`<tr><td><b>${c.name}</b></td><td>${c.company||''}</td>
-    <td><span style="color:${c.score>=70?'var(--green)':c.score>=45?'var(--amber)':'#C2453A'};font-weight:700">${c.score}</span></td>
-    <td>${c.wa_id||'—'}</td><td>${c.status}</td></tr>`).join('');
+  try{
+    const cs = await j('/api/contacts',{method:'GET'});
+    const tb = $('#contactsBody'); tb.innerHTML='';
+    if (!cs.length){ tb.innerHTML = '<tr><td colspan="5" class="empty">Nenhum contato ainda — converse pelo WhatsApp ou cace leads na aba Prospecção. 💜</td></tr>'; return; }
+    cs.forEach(c=>{ tb.innerHTML += `<tr><td><b>${c.name}</b></td><td>${c.company||''}</td>
+      <td><span style="color:${c.score>=70?'var(--green)':c.score>=45?'var(--amber)':'#C2453A'};font-weight:700">${c.score}</span></td>
+      <td>${c.wa_id||'—'}</td><td>${c.status}</td></tr>`; });
+  }catch(e){ showErr('Contatos: '+e.message); }
 }
 
 async function loadThreads(){
-  const ts = await j('/api/threads',{method:'GET'});
-  const box = $('#threadList'); box.innerHTML='<h2>Conversas</h2>';
-  ts.forEach(t=>{
-    const b = document.createElement('button'); b.className='thread'+(t.id===curThread?' active':'');
-    b.innerHTML = `<b>${t.name}</b> <span style="color:var(--ai-deep);font-weight:700">· ${t.score}</span>
-      ${t.unread?`<span style="float:right;background:var(--wa);color:#fff;border-radius:9px;padding:0 7px;font-size:11px;font-weight:700">${t.unread}</span>`:''}
-      <small>${(t.last_body||'sem mensagens').slice(0,60)}</small>`;
-    b.onclick = () => openThread(t.id, t);
-    box.appendChild(b);
-  });
+  try{
+    const ts = await j('/api/threads',{method:'GET'});
+    const box = $('#threadList'); box.innerHTML='<h2>Conversas</h2>';
+    if (!ts.length){ box.innerHTML += '<div class="empty">Nenhuma conversa ainda — mande uma mensagem do celular para o número da instância e ela aparece aqui. 💬</div>'; return; }
+    ts.forEach(t=>{
+      const b = document.createElement('button'); b.className='thread'+(t.id===curThread?' active':'');
+      b.innerHTML = `<b>${t.name}</b> <span style="color:var(--ai-deep);font-weight:700">· ${t.score}</span>
+        ${t.unread?`<span style="float:right;background:var(--wa);color:#fff;border-radius:9px;padding:0 7px;font-size:11px;font-weight:700">${t.unread}</span>`:''}
+        <small>${(t.last_body||'sem mensagens').slice(0,60)}</small>`;
+      b.onclick = () => openThread(t.id, t);
+      box.appendChild(b);
+    });
+  }catch(e){ showErr('Conversas: '+e.message); }
 }
 
 async function openThread(id, t){
@@ -183,16 +214,23 @@ function addSugg(text, reason){
 $('#sendBtn').onclick = async () => {
   const text = $('#msgInput').value.trim(); if(!text||!curThread) return;
   $('#msgInput').value='';
-  await j('/api/messages/send',{body:{conversation_id:curThread, text}});
-  const t = (await j('/api/threads',{method:'GET'})).find(x=>x.id===curThread);
-  openThread(curThread, t);
+  try{
+    await j('/api/messages/send',{body:{conversation_id:curThread, text}});
+    const t = (await j('/api/threads',{method:'GET'})).find(x=>x.id===curThread);
+    openThread(curThread, t);
+  }catch(e){ showErr('Enviar: '+e.message); }
 };
 $('#msgInput').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#sendBtn').click(); });
 
 // polling leve: novas sugestões de IA + threads
-setInterval(async ()=>{ loadThreads(); if(curThread){ const t=(await j('/api/threads',{method:'GET'})).find(x=>x.id===curThread); if(t&&t.next_suggestion) addSugg(t.next_suggestion,t.suggestion_reason);} }, 8000);
+setInterval(async ()=>{ try{ await loadThreads(); if(curThread){ const t=(await j('/api/threads',{method:'GET'})).find(x=>x.id===curThread); if(t&&t.next_suggestion) addSugg(t.next_suggestion,t.suggestion_reason);} }catch(e){/* polling silencioso */} }, 8000);
 
-(async ()=>{ await Promise.all([loadFunil(), loadContatos(), loadThreads()]); const h=await j('/api/health',{method:'GET'}); $('#health').textContent = h.ok ? '● conectado' : '● offline'; })();
+(async ()=>{ try{
+    await Promise.all([loadFunil(), loadContatos(), loadThreads()]);
+    const h = await j('/api/health',{method:'GET'});
+    $('#health').textContent = h.ok ? '● conectado' : '● offline';
+  }catch(e){ showErr('Carga inicial: '+e.message); $('#health').textContent = '● offline'; }
+})();
 </script>
 </body>
 </html>
