@@ -116,7 +116,7 @@ pre{white-space:pre-wrap;font-family:inherit;font-size:13px;line-height:1.5}
     <button data-v="prosp"><i>🧲</i> Prospecção</button>
     <button data-v="metricas"><i>📊</i> Métricas</button>
   </nav>
-  <div class="status"><span class="ok" id="health">● conectando…</span>v13.7.1 · NEON CRM</div>
+  <div class="status"><span class="ok" id="health">● conectando…</span>v13.7.4 · NEON CRM</div>
 </aside>
 <div class="maincol">
 <div class="bar">
@@ -164,23 +164,10 @@ pre{white-space:pre-wrap;font-family:inherit;font-size:13px;line-height:1.5}
       </div>
     </div>
     <div class="card" style="margin-bottom:14px">
-      <h2>1 · Buscar negócios no Google</h2>
-      <div class="inner">
-        <div class="row">
-          <input type="text" id="q" placeholder='ex.: "salão de beleza em Aracaju" ou "bares em Aracaju"'>
-          <button class="btn btn-ai" id="btnSearch">Buscar</button>
-        </div>
-        <div id="cands" style="margin-top:10px"></div>
-        <div class="row" style="margin-top:10px">
-          <button class="btn" id="btnImport">Importar selecionados (com telefone)</button>
-          <span class="muted">5.000 buscas/mês grátis no plano atual do Google — use sem medo.</span>
-        </div>
-      </div>
-    </div>
-    <div class="card" style="margin-bottom:14px">
-      <h2>2 · Mensagem de abordagem (use {nome} e {categoria}) — rodapé de opt-out é adicionado automaticamente</h2>
+      <h2>2 · Mensagem de abordagem (use {nome} e {categoria}) — imagem opcional do disparo</h2>
       <div class="inner">
         <textarea id="tpl"></textarea>
+        <input type="text" id="tplImg" placeholder="URL da imagem para anexar no disparo (opcional — ex.: https://…/proposta-b.jpg). Vazia = envia só texto." style="width:100%;margin-top:8px;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:13px;outline:none;background:#FAF9FE;color:var(--ink);font-family:inherit">
         <div class="row" style="margin-top:8px">
           <button class="btn" id="btnTpl">Salvar mensagem</button>
           <button class="btn btn-gray" id="btnReloadProsp">Recarregar</button>
@@ -372,6 +359,7 @@ async function loadStatus(){
     $('#btnToggle').className = 'btn ' + (s.running ? 'btn-red' : 'btn-green');
     $('#prospWindow').textContent = `${s.sent_today}/${s.daily_cap} hoje · janela ${s.window} ${s.within_hours?'✅ aberta':'⏰ fechada'}`;
     if ($('#tpl').value.trim() === '') $('#tpl').value = s.template;
+    if (s.image_url !== undefined && $('#tplImg') && $('#tplImg').value.trim() === '') $('#tplImg').value = s.image_url || '';
   }catch(e){ showErr('Status: '+e.message); }
 }
 
@@ -470,7 +458,10 @@ async function runTest(){
 async function saveTpl(){
   try{
     const r = await j('/api/prospect/template',{body:{template: $('#tpl').value}});
-    alert(r.ok ? 'Mensagem salva no servidor! ✅ Para conferir: esvazia o campo e clica em Recarregar — deve voltar exatamente esta mensagem.' : r.error);
+    let imgMsg = '';
+    try { const ri = await j('/api/prospect/image',{body:{url: $('#tplImg').value.trim()}}); if (ri.ok) imgMsg = ' (imagem do disparo atualizada)'; }
+    catch(e2){ imgMsg = ' — atenção: a imagem NÃO foi salva ('+e2.message+')'; }
+    alert(r.ok ? 'Mensagem salva no servidor! ✅ Para conferir: esvazia o campo e clica em Recarregar — deve voltar exatamente esta mensagem.' + imgMsg : r.error);
   }catch(e){ showErr('Mensagem: '+e.message); }
 }
 $('#btnSearch').onclick = search;
@@ -483,6 +474,7 @@ $('#btnReloadProsp').onclick = async () => {
   try{
     const s = await j('/api/prospect/status',{method:'GET'});
     $('#tpl').value = s.template; // força: mostra EXATAMENTE o que o servidor tem guardado
+    if (s.image_url !== undefined) $('#tplImg').value = s.image_url || '';
     loadLeads(); loadStatus();
   }catch(e){ showErr('Recarregar: '+e.message); }
 };
