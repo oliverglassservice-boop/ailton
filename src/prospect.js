@@ -21,6 +21,9 @@
  * v13.7.3: TEMPLATE_DEFAULT reescrito — direto, explicativo, com a promessa
  *        certa (atendente de IA no número do cliente, responde em segundos,
  *        24h, tira dúvidas e agenda sozinha) + convite fácil de responder.
+ * v13.7.4: IMAGEM NO DISPARO — campo "URL da imagem (opcional)" no painel;
+ *        configurada, o disparo envia sendImage (arte + mensagem como
+ *        legenda); vazia, segue só texto. Rota /api/prospect/image (UPSERT).
  */
 import express from 'express';
 import { query } from './db.js';
@@ -76,6 +79,12 @@ async function migrate() {
 async function getTemplate() {
   const r = await query(`SELECT value FROM prospect_settings WHERE key = 'template'`);
   return r.rows[0]?.value || TEMPLATE_DEFAULT;
+}
+
+/** v13.7.4: URL da imagem opcional que vai anexada ao disparo (vazia = só texto). */
+async function getImageUrl() {
+  const r = await query(`SELECT value FROM prospect_settings WHERE key = 'image_url'`);
+  return r.rows[0]?.value || '';
 }
 
 /* ------------------------- Google Places ------------------------- */
@@ -152,15 +161,17 @@ async function tick() {
     )).rows[0];
     if (!lead) return;
     const text = personalize(await getTemplate(), lead);
+    const img = await getImageUrl(); // v13.7.4: imagem opcional do disparo
     try {
-      await wa.sendText(lead.phone, text);
+      if (img) await wa.sendImage(lead.phone, img, text); // arte + mensagem como legenda
+      else await wa.sendText(lead.phone, text);
       await query(
         `UPDATE prospect_leads SET status='enviado', last_message=$2, sent_count=sent_count+1,
          last_sent_at=now() WHERE id=$1`,
         [lead.id, text]
       );
       console.log('[prospect] mensagem enviada p/ ', lead.name,
-        `${testMode ? ' [MODO TESTE]' : ''} (${await sentToday()}/${DAILY_CAP} hoje)`);
+        `${testMode ? ' [MODO TESTE]' : ''} ${img ? '[🖼 com imagem]' : ''} (${await sentToday()}/${DAILY_CAP} hoje)`);
     } catch (e) {
       console.error('[prospect] falha ao enviar p/', lead.name, ':', e.message);
       await query(`UPDATE prospect_leads SET status='enviado', last_message=$2, last_sent_at=now() WHERE id=$1`,
@@ -251,6 +262,19 @@ export function mountProspect(app) {
     } catch (e) { res.status(500).json({ error: String(e.message) }); }
   });
 
+  router.post('/image', async (req, res) => {
+    // v13.7.4: define/limpa a imagem anexada ao disparo (URL pública https).
+    // URL vazia = volta para "só texto". Grava em prospect_settings (UPSERT).
+    const v = String(req.body?.url || '').trim();
+    if (v && !/^https:\/\/.+/i.test(v)) return res.status(400).json({ error: 'URL da imagem inválida (use https://…)' });
+    await query(
+      `INSERT INTO prospect_settings (key, value) VALUES ('image_url', $1)
+       ON CONFLICT (key) DO UPDATE SET value = $1`,
+      [v]
+    );
+    res.json({ ok: true, image_url: v });
+  });
+
   router.get('/leads', async (_req, res) => {
     const r = await query(`SELECT * FROM prospect_leads ORDER BY
       CASE status WHEN 'fila' THEN 0 WHEN 'novo' THEN 1 WHEN 'enviado' THEN 2
@@ -287,6 +311,7 @@ export function mountProspect(app) {
       `SELECT status, count(*)::int AS n FROM prospect_leads GROUP BY status`)).rows;
     const by = Object.fromEntries(counts.map(c => [c.status, c.n]));
     const template = await getTemplate();
+    const image_url = await getImageUrl(); // v13.7.4: o painel mostra a imagem configurada
     res.json({
       running,
       test_mode: testMode,
@@ -296,6 +321,7 @@ export function mountProspect(app) {
       window: `${WINDOW[0]}h-${WINDOW[1]}h`,
       counts: by,
       template,
+      image_url,
     });
   });
 
