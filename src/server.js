@@ -1,5 +1,5 @@
 /**
- * NEON CRM — servidor v13.2 (multi-provedor WhatsApp: Evolution API | Uazapi).
+ * NEON CRM — servidor v13.5 (multi-provedor WhatsApp: Evolution API | Uazapi).
  * Núcleo: contatos, deals, inbox WhatsApp, AI Gateway (OpenAI),
  * Prospecção Ativa (Google Places + disparo com guardrails).
  * v11: login no painel (Basic Auth) + persona de vendas + guarda de horário.
@@ -13,6 +13,9 @@
  * v13.3: ÁUDIO RESPONDE — transcrição segue o fluxo da IA; download de mídia
  *       com chave completa (Evolution); schema.sql sem dados-demo (não voltam
  *       mais no Deploy após limpeza).
+ * v13.5: OPT-OUT LGPD — "SAIR" marca o contato (nunca mais recebe resposta
+ *       automática nem disparo de prospecção) + PAINEL DE MÉTRICAS
+ *       (/api/metrics + aba "Métricas" no painel).
  */
 import express from 'express';
 import path from 'path';
@@ -82,6 +85,40 @@ app.get('/api/debug/env', (_req, res) => res.json({
   panel_login_ativo: !!(PANEL_USER && PANEL_PASS),
   ai_window: `${AI_WINDOW[0]}h-${AI_WINDOW[1]}h`,
 }));
+
+/* ---------------- API: métricas do negócio (v13.5) ---------------- */
+app.get('/api/metrics', async (_req, res) => {
+  try {
+    const m = (await query(`
+      SELECT
+        (SELECT count(*)::int FROM contacts)  AS contatos,
+        (SELECT count(*)::int FROM contacts WHERE opt_out)  AS opt_outs,
+        (SELECT count(*)::int FROM conversations)  AS conversas,
+        (SELECT count(*)::int FROM conversations WHERE last_msg_at > now() - interval '7 days') AS conversas_7d,
+        (SELECT count(*)::int FROM messages WHERE direction = 'in'  AND created_at > now() - interval '7 days') AS msgs_in_7d,
+        (SELECT count(*)::int FROM messages WHERE direction = 'out' AND created_at > now() - interval '7 days') AS msgs_out_7d,
+        (SELECT count(*)::int FROM conversations WHERE EXISTS (
+            SELECT 1 FROM messages mm WHERE mm.conversation_id = conversations.id AND mm.direction = 'in'
+        )) AS conversas_com_resposta,
+        (SELECT count(*)::int FROM deals WHERE stage NOT IN ('ganho','perdido')) AS deals_abertos,
+        (SELECT COALESCE(sum(value_cents),0)::bigint FROM deals WHERE stage NOT IN ('ganho','perdido')) AS pipeline_cents,
+        (SELECT count(*)::int FROM appointments WHERE status = 'confirmado' AND scheduled_for > now()) AS agendamentos_futuros
+    `)).rows[0];
+    const prospeccao = Object.fromEntries((await query(
+      `SELECT status, count(*)::int AS n FROM prospect_leads GROUP BY status`
+    )).rows.map(r => [r.status, r.n]));
+    const disparos_hoje = (await query(
+      `SELECT count(*)::int AS n FROM prospect_leads WHERE last_sent_at::date = now()::date`
+    )).rows[0].n;
+    res.json({
+      ...m,
+      taxa_resposta: m.conversas ? Math.round(100 * m.conversas_com_resposta / m.conversas) : 0,
+      prospeccao,
+      disparos_hoje,
+      gerado_em: new Date().toISOString(),
+    });
+  } catch (e) { res.status(500).json({ error: String(e.message) }); }
+});
 
 /* ---------------- API: contatos ---------------- */
 app.get('/api/contacts', async (_req, res) => {
@@ -260,9 +297,31 @@ async function waWebhook(req, res) {
 
     if (msg.fromMe || msg.kind !== 'text') return;
 
+    // ---- v13.5: OPT-OUT (LGPD) — pedido de saída é honrado na hora, sem IA ----
+    const norm = body.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (/^(sair|parar|descadastrar|nao quero mais|nao quero receber|parar de receber|nao quero ser mais procurado)$/.test(norm)) {
+      await query(`UPDATE contacts SET opt_out = TRUE, consent_lgpd = FALSE WHERE id = $1`, [contact.id]);
+      await query(`UPDATE prospect_leads SET status = 'optout' WHERE phone = $1`, [waNumber]);
+      const confirmMsg = 'Registrado! A partir de agora não vou mais te mandar mensagem. Se um dia mudar de ideia, estarei por aqui. 💜';
+      try {
+        await wa.sendText(waNumber, confirmMsg);
+        await query(
+          `INSERT INTO messages (conversation_id, direction, kind, body) VALUES ($1,'out','text',$2)`,
+          [conversation.id, confirmMsg]
+        );
+      } catch (_) { /* confirmação falhou — o registro de opt-out já vale */ }
+      console.log('[optout] ✅ contato', waNumber, 'marcado — não recebe mais automação nenhuma');
+      return;
+    }
+
     // ---- IA em background: intenção + sugestão (+ auto-resposta opcional) ----
     (async () => {
       try {
+        // v13.5: opt-out vence TUDO — contato marcado nunca mais recebe IA
+        const ou = (await query(`SELECT opt_out FROM contacts WHERE id = $1`, [contact.id])).rows[0];
+        if (ou?.opt_out) { console.log('[ia] contato opt-out — IA dispensada'); return; }
+
         // v11: lead de prospecção? → a IA troca de persona (vende o Mais Automação)
         const isProspect = (await query(
           `SELECT 1 FROM prospect_leads WHERE phone=$1 AND status IN ('fila','enviado','respondeu') LIMIT 1`,
@@ -407,7 +466,7 @@ setInterval(async () => {
   } catch (e) { console.error('[lembrete] erro no worker:', e.message); }
 }, 5 * 60 * 1000);
 
-console.log(`[boot] NEON CRM v13.3 no ar | provider=${PROVIDER} | AUTO_RESPOND=${process.env.AUTO_RESPOND || '(NÃO definido!)'} | login_painel=${PANEL_USER && PANEL_PASS ? 'ATIVO' : 'desativado'} | janela_IA=${AI_WINDOW[0]}h-${AI_WINDOW[1]}h | agenda+lembretes+áudio: LIGADOS`);
+console.log(`[boot] NEON CRM v13.5 no ar | provider=${PROVIDER} | AUTO_RESPOND=${process.env.AUTO_RESPOND || '(NÃO definido!)'} | login_painel=${PANEL_USER && PANEL_PASS ? 'ATIVO' : 'desativado'} | janela_IA=${AI_WINDOW[0]}h-${AI_WINDOW[1]}h | opt-out: LIGADO | agenda+lembretes+áudio+métricas: LIGADOS`);
 app.listen(PORT, () => console.log(`NEON CRM no ar em ${process.env.APP_URL || 'http://localhost:' + PORT}`));
 
 process.on('SIGTERM', () => { pool.end().then(() => process.exit(0)); });
