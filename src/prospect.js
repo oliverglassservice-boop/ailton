@@ -10,6 +10,8 @@
  * Autorização: login do painel (Basic Auth) OU ?secret=PROSPECT_SECRET.
  * v13.5: rodapé de opt-out (LGPD) em TODO disparo + nunca dispara para
  *        número que pediu saída (contatos.opt_out).
+ * v13.5.2: MODO TESTE — disparo iniciado em modo teste envia SOMENTE para
+ *        leads de teste (source_query='teste-manual'), nunca para leads reais.
  */
 import express from 'express';
 import { query } from './db.js';
@@ -27,7 +29,8 @@ const TEMPLATE_DEFAULT =
   'mais clientes no WhatsApp — hoje responde o número de vocês quando chega mensagem? ' +
   'Desenvolvi um sistema que responde na hora e agenda sozinho. Posso te mostrar funcionando em 5 minutinhos?';
 
-let running = false; // em memória: reinício do serviço = disparo parado (seguro)
+let running = false;  // em memória: reinício do serviço = disparo parado (seguro)
+let testMode = false; // v13.5.2: modo teste — só leads de teste recebem
 
 /* ------------------------- migração própria ------------------------- */
 async function migrate() {
@@ -123,9 +126,12 @@ async function tick() {
   try {
     if (!running || !withinBusinessHours()) return;
     if ((await sentToday()) >= DAILY_CAP) return;
+    // v13.5.2: em MODO TESTE, a query só enxerga leads de teste —
+    // leads reais na fila ficam intocados até o disparo REAL ser iniciado.
     const lead = (await query(
       `SELECT l.* FROM prospect_leads l
         WHERE l.status = 'fila' AND l.phone <> ''
+          ${testMode ? `AND l.source_query = 'teste-manual'` : ''}
           AND NOT EXISTS (   -- v13.5: nunca dispara p/ quem pediu SAIR
             SELECT 1 FROM contacts c
             WHERE REGEXP_REPLACE(c.wa_id, '\\D', '', 'g') = REGEXP_REPLACE(l.phone, '\\D', '', 'g')
@@ -142,7 +148,8 @@ async function tick() {
          last_sent_at=now() WHERE id=$1`,
         [lead.id, text]
       );
-      console.log('[prospect] mensagem enviada p/ ', lead.name, `(${await sentToday()}/${DAILY_CAP} hoje)`);
+      console.log('[prospect] mensagem enviada p/ ', lead.name,
+        `${testMode ? ' [MODO TESTE]' : ''} (${await sentToday()}/${DAILY_CAP} hoje)`);
     } catch (e) {
       console.error('[prospect] falha ao enviar p/', lead.name, ':', e.message);
       await query(`UPDATE prospect_leads SET status='enviado', last_message=$2, last_sent_at=now() WHERE id=$1`,
@@ -245,9 +252,13 @@ export function mountProspect(app) {
   });
 
   router.post('/control', async (req, res) => {
-    running = req.body.action === 'start';
-    console.log('[prospect] disparo', running ? 'INICIADO' : 'PARADO');
-    res.json({ running });
+    const { action } = req.body; // start | start-test | stop
+    if (action === 'start-test') { running = true; testMode = true; }
+    else if (action === 'start') { running = true; testMode = false; }
+    else { running = false; testMode = false; }
+    console.log('[prospect] disparo',
+      running ? (testMode ? 'INICIADO — 🧪 MODO TESTE (só leads de teste recebem)' : 'INICIADO — 🔥 REAL') : 'PARADO');
+    res.json({ running, test_mode: testMode });
   });
 
   router.get('/status', async (_req, res) => {
@@ -257,6 +268,7 @@ export function mountProspect(app) {
     const template = await getTemplate();
     res.json({
       running,
+      test_mode: testMode,
       within_hours: withinBusinessHours(),
       sent_today: await sentToday(),
       daily_cap: DAILY_CAP,
@@ -276,5 +288,5 @@ export function mountProspect(app) {
   app.use('/api/prospect', router);
   migrate().catch(e => console.error('[prospect] migração:', e.message));
   setInterval(tick, 60_000); // verifica a cada minuto (máx. 1 msg/min — ritmo seguro)
-  console.log('[prospect] módulo de prospecção montado (rotas /api/prospect/*, worker 1/min)');
+  console.log('[prospect] módulo de prospecção montado (rotas /api/prospect/*, worker 1/min, suporte a MODO TESTE)');
 }
