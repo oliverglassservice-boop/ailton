@@ -121,6 +121,7 @@ pre{white-space:pre-wrap;font-family:inherit;font-size:13px;line-height:1.5}
       <div class="kpi" style="display:flex;align-items:center;gap:12px;grid-column:1/-1">
         <span class="tag off" id="statusBadge" style="font-size:12px;padding:4px 10px">PARADO</span>
         <button class="btn btn-green" id="btnToggle">Iniciar disparo</button>
+        <button class="btn btn-ai" id="btnTest">🧪 Iniciar disparo de TESTE</button>
         <span class="muted" id="prospWindow"></span>
       </div>
     </div>
@@ -319,9 +320,9 @@ async function loadStatus(){
   try{
     const s = await j('/api/prospect/status',{method:'GET'});
     const badge = $('#statusBadge');
-    badge.textContent = s.running ? 'DISPARANDO' : 'PARADO';
-    badge.style.background = s.running ? 'var(--green-soft)' : '#FDECEC';
-    badge.style.color = s.running ? 'var(--green)' : 'var(--red)';
+    badge.textContent = s.running ? (s.test_mode ? '🧪 MODO TESTE' : 'DISPARANDO') : 'PARADO';
+    badge.style.background = s.running ? (s.test_mode ? 'var(--amber-soft)' : 'var(--green-soft)') : '#FDECEC';
+    badge.style.color = s.running ? (s.test_mode ? 'var(--amber)' : 'var(--green)') : 'var(--red)';
     $('#btnToggle').textContent = s.running ? 'Parar disparo' : 'Iniciar disparo';
     $('#btnToggle').className = 'btn ' + (s.running ? 'btn-red' : 'btn-green');
     $('#prospWindow').textContent = `${s.sent_today}/${s.daily_cap} hoje · janela ${s.window} ${s.within_hours?'✅ aberta':'⏰ fechada'}`;
@@ -395,6 +396,13 @@ async function toggleRun(){
     loadStatus();
   }catch(e){ showErr('Disparo: '+e.message); }
 }
+async function runTest(){
+  try{
+    if(!confirm('MODO TESTE: só os leads com categoria "teste manual" vão receber. Leads reais na fila ficam intocados. Continuar?')) return;
+    await j('/api/prospect/control',{body:{action:'start-test'}});
+    loadStatus();
+  }catch(e){ showErr('Disparo teste: '+e.message); }
+}
 async function saveTpl(){
   try{
     const r = await j('/api/prospect/template',{body:{template: $('#tpl').value}});
@@ -405,6 +413,7 @@ $('#btnSearch').onclick = search;
 $('#btnImport').onclick = importSel;
 $('#btnEnqueue').onclick = enqueueAll;
 $('#btnToggle').onclick = toggleRun;
+$('#btnTest').onclick = runTest;
 $('#btnTpl').onclick = saveTpl;
 $('#btnReloadProsp').onclick = () => { loadStatus(); loadLeads(); };
 
