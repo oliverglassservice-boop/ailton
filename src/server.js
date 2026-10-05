@@ -1,5 +1,5 @@
 /**
- * NEON CRM — servidor v13 (multi-provedor WhatsApp: Evolution API | Uazapi).
+ * NEON CRM — servidor v13.1 (multi-provedor WhatsApp: Evolution API | Uazapi).
  * Núcleo: contatos, deals, inbox WhatsApp, AI Gateway (OpenAI),
  * Prospecção Ativa (Google Places + disparo com guardrails).
  * v11: login no painel (Basic Auth) + persona de vendas + guarda de horário.
@@ -7,6 +7,7 @@
  *       transcrição de áudio (Whisper) direto no webhook.
  * v13: WHATSAPP_PROVIDER=evolution|uazapi (padrão: uazapi até migrar).
  *       Webhook aceita /webhooks/evolution e /webhooks/uazapi (mesmo handler).
+ * v13.1: HTML sem cache no navegador (acabou o "painel velho" pós-Deploy).
  */
 import express from 'express';
 import path from 'path';
@@ -344,7 +345,12 @@ app.post('/webhooks/evolution', waWebhook);
 
 /* ---------------- UI (protegida por login quando configurado) ---------------- */
 app.use(requirePanelAuth);
-app.use(express.static(path.join(__dirname, '..', 'public')));
+// HTML sempre fresco (sem cache de navegador) — evita "painel velho" após Deploy.
+app.use(express.static(path.join(__dirname, '..', 'public'), {
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.html')) res.setHeader('Cache-Control', 'no-store');
+  },
+}));
 
 const PORT = process.env.PORT || 3000;
 await migrate();
@@ -384,7 +390,7 @@ setInterval(async () => {
   } catch (e) { console.error('[lembrete] erro no worker:', e.message); }
 }, 5 * 60 * 1000);
 
-console.log(`[boot] NEON CRM v13 no ar | provider=${PROVIDER} | AUTO_RESPOND=${process.env.AUTO_RESPOND || '(NÃO definido!)'} | login_painel=${PANEL_USER && PANEL_PASS ? 'ATIVO' : 'desativado'} | janela_IA=${AI_WINDOW[0]}h-${AI_WINDOW[1]}h | agenda+lembretes+áudio: LIGADOS`);
+console.log(`[boot] NEON CRM v13.1 no ar | provider=${PROVIDER} | AUTO_RESPOND=${process.env.AUTO_RESPOND || '(NÃO definido!)'} | login_painel=${PANEL_USER && PANEL_PASS ? 'ATIVO' : 'desativado'} | janela_IA=${AI_WINDOW[0]}h-${AI_WINDOW[1]}h | agenda+lembretes+áudio: LIGADOS`);
 app.listen(PORT, () => console.log(`NEON CRM no ar em ${process.env.APP_URL || 'http://localhost:' + PORT}`));
 
 process.on('SIGTERM', () => { pool.end().then(() => process.exit(0)); });
