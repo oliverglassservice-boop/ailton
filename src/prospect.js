@@ -24,6 +24,10 @@
  * v13.7.4: IMAGEM NO DISPARO — campo "URL da imagem (opcional)" no painel;
  *        configurada, o disparo envia sendImage (arte + mensagem como
  *        legenda); vazia, segue só texto. Rota /api/prospect/image (UPSERT).
+ * v13.7.5: JANELA 24/7 — domingo só fica bloqueado se BLOCK_SUNDAY=true no
+ *        Environment (padrão: liberado). Com PROSPECT_WINDOW=0-24 o disparo
+ *        roda 24h todos os dias. Para voltar ao modo profissional sem tocar
+ *        em código: BLOCK_SUNDAY=true + PROSPECT_WINDOW=9-19 + Deploy.
  */
 import express from 'express';
 import { query } from './db.js';
@@ -36,6 +40,7 @@ const wa = (process.env.WHATSAPP_PROVIDER || 'uazapi') === 'evolution'
 const SECRET = process.env.PROSPECT_SECRET || '';
 const DAILY_CAP = Number(process.env.PROSPECT_DAILY_CAP || 40);
 const WINDOW = (process.env.PROSPECT_WINDOW || '9-19').split('-').map(Number); // ex.: 9-19
+const BLOCK_SUNDAY = (process.env.BLOCK_SUNDAY || 'false') === 'true'; // v13.7.5: 'true' volta a bloquear domingo
 const TEMPLATE_DEFAULT =
   'Oi! Tudo bem? Sou o Ailton. Ajudo {categoria} a parar de perder clientes no WhatsApp: ' +
   'a mensagem chega, a resposta demora — e o cliente acaba comprando do concorrente.\n\n' +
@@ -122,7 +127,7 @@ function withinBusinessHours() {
   const now = new Date(); // servidor roda em UTC; Aracaju = UTC-3
   const hLocal = (now.getUTCHours() + 24 - 3) % 24;
   const dow = now.getUTCDay(); // 0 dom … 6 sáb
-  if (dow === 0) return false; // domingo não dispara
+  if (dow === 0 && BLOCK_SUNDAY) return false; // v13.7.5: domingo bloqueado SÓ com BLOCK_SUNDAY=true (agora 24/7)
   return hLocal >= WINDOW[0] && hLocal < WINDOW[1];
 }
 
