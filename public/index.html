@@ -470,3 +470,80 @@ async function clearAllLeads(){
   }catch(e){ showErr('Apagar todos: '+e.message); }
 }
 $('#btnClearAll').onclick
+    = clearAllLeads;
+async function enqueueAll(){ try{ await j('/api/prospect/enqueue-all',{body:{}}); loadLeads(); loadStatus(); }catch(e){ showErr('Fila: '+e.message); } }
+async function toggleRun(){
+  try{
+    const starting = $('#statusBadge').textContent !== 'DISPARANDO';
+    if (starting && !confirm('DISPARO REAL: vai enviar para TODOS os leads na fila (inclui os do Google). Se a intenção era testar, use o botão 🧪. Continuar?')) return;
+    await j('/api/prospect/control',{body:{action: starting?'start':'stop'}});
+    loadStatus();
+  }catch(e){ showErr('Disparo: '+e.message); }
+}
+async function runTest(){
+  try{
+    if(!confirm('MODO TESTE: só os leads com categoria "teste manual" vão receber. Leads reais na fila ficam intocados. Continuar?')) return;
+    await j('/api/prospect/control',{body:{action:'start-test'}});
+    loadStatus();
+  }catch(e){ showErr('Disparo teste: '+e.message); }
+}
+async function saveTpl(){
+  try{
+    const r = await j('/api/prospect/template',{body:{template: $('#tpl').value}});
+    let imgMsg = '';
+    try { const ri = await j('/api/prospect/image',{body:{url: $('#tplImg').value.trim()}}); if (ri.ok) imgMsg = ' (imagem do disparo atualizada)'; }
+    catch(e2){ imgMsg = ' — atenção: a imagem NÃO foi salva ('+e2.message+')'; }
+    alert(r.ok ? 'Mensagem salva no servidor! ✅ Para conferir: esvazia o campo e clica em Recarregar — deve voltar exatamente esta mensagem.' + imgMsg : r.error);
+  }catch(e){ showErr('Mensagem: '+e.message); }
+}
+$('#btnSearch').onclick = search;
+$('#btnImport').onclick = importSel;
+$('#btnEnqueue').onclick = enqueueAll;
+$('#btnToggle').onclick = toggleRun;
+$('#btnTest').onclick = runTest;
+$('#btnTpl').onclick = saveTpl;
+$('#btnReloadProsp').onclick = async () => {
+  try{
+    const s = await j('/api/prospect/status',{method:'GET'});
+    $('#tpl').value = s.template; // força: mostra EXATAMENTE o que o servidor tem guardado
+    if (s.image_url !== undefined) $('#tplImg').value = s.image_url || '';
+    loadLeads(); loadStatus();
+  }catch(e){ showErr('Recarregar: '+e.message); }
+};
+
+/* ================= MÉTRICAS (aba v13.5) ================= */
+const PROSP_LABELS = {novo:'Novos (importados)', fila:'Na fila', enviado:'Enviados', respondeu:'Responderam', optout:'Opt-out (sairam)', descartado:'Descartados'};
+async function loadMetrics(){
+  try{
+    const m = await j('/api/metrics',{method:'GET'});
+    $('#m-contatos').textContent = m.contatos;
+    $('#m-conv7').textContent = m.conversas_7d;
+    $('#m-taxa').textContent = m.taxa_resposta + '%';
+    $('#m-disparos').textContent = m.disparos_hoje;
+    $('#m-agend').textContent = m.agendamentos_futuros;
+    $('#m-msgs').textContent = `${m.msgs_in_7d} ▼ · ${m.msgs_out_7d} ▲`;
+    $('#m-pipe').textContent = fmt(Number(m.pipeline_cents||0));
+    $('#m-deals').textContent = `${m.deals_abertos} negócios abertos`;
+    $('#m-optout').textContent = m.opt_outs;
+    const p = m.prospeccao||{};
+    $('#prospBody').innerHTML = Object.keys(PROSP_LABELS).map(s=>
+      `<tr><td><span class="tag ${s}">${PROSP_LABELS[s]}</span></td><td><b>${p[s]||0}</b></td></tr>`).join('');
+  }catch(e){ showErr('Métricas: '+e.message); }
+}
+
+// polling leve: novas sugestões de IA + threads + métricas frescas
+setInterval(async ()=>{ try{ await loadThreads(); if(curThread){ const t=(await j('/api/threads',{method:'GET'})).find(x=>x.id===curThread); if(t&&t.next_suggestion) addSugg(t.next_suggestion,t.suggestion_reason);} }catch(e){/* polling silencioso */} }, 8000);
+setInterval(()=>{ try{ loadStatus(); loadMetrics(); }catch(e){} }, 60000);
+
+(async ()=>{ try{
+    await Promise.all([loadFunil(), loadContatos(), loadThreads(), loadStatus(), loadMetrics()]);
+    const h = await j('/api/health',{method:'GET'});
+    $('#health').textContent = h.ok ? '● conectado' : '● offline';
+    if (location.hash === '#prosp') document.querySelector('nav button[data-v="prosp"]').click();
+  }catch(e){ showErr('Carga inicial: '+e.message); $('#health').textContent = '● offline'; }
+})();
+</script>
+</body>
+</html>
+
+   
