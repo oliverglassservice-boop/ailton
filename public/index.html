@@ -116,7 +116,7 @@ pre{white-space:pre-wrap;font-family:inherit;font-size:13px;line-height:1.5}
     <button data-v="prosp"><i>🧲</i> Prospecção</button>
     <button data-v="metricas"><i>📊</i> Métricas</button>
   </nav>
-  <div class="status"><span class="ok" id="health">● conectando…</span>v13.7.4 · NEON CRM</div>
+  <div class="status"><span class="ok" id="health">● conectando…</span>v13.8 · NEON CRM</div>
 </aside>
 <div class="maincol">
 <div class="bar">
@@ -179,10 +179,13 @@ pre{white-space:pre-wrap;font-family:inherit;font-size:13px;line-height:1.5}
       <div class="inner">
         <div class="row" style="margin-bottom:10px">
           <button class="btn" id="btnEnqueue">Colocar todos os novos na fila</button>
-          <input type="text" id="testName" placeholder="Nome do lead de teste (ex.: Ailton - celular)">
+          <input type="text" id="testName" placeholder="Nome do lead (ex.: Ailton - celular)">
           <input type="text" id="testPhone" placeholder="Telefone: 55 + DDD + número">
+          <input type="text" id="manualCat" placeholder="Categoria p/ lead real (opcional)">
           <button class="btn btn-ai" id="btnAddTest">+ Adicionar lead de teste</button>
+          <button class="btn" id="btnAddManual">👤 Inserir lead manual REAL</button>
           <button class="btn btn-red" id="btnClearTests">🧹 Limpar leads de teste</button>
+          <button class="btn btn-red" id="btnClearAll">🗑️ Apagar TODOS os leads</button>
         </div>
         <div style="overflow:auto">
           <table>
@@ -190,7 +193,7 @@ pre{white-space:pre-wrap;font-family:inherit;font-size:13px;line-height:1.5}
             <tbody id="leadsBody"></tbody>
           </table>
         </div>
-        <p class="muted" style="margin-top:8px">Lead de teste adicionado já cai direto na fila. Quem responde "SAIR" sai da lista na hora (opt-out automático, LGPD). As demais respostas chegam na aba WhatsApp — feche você mesmo, é a parte humana que vende. 😉</p>
+        <p class="muted" style="margin-top:8px">Lead de teste já cai na fila (recebe só no modo 🧪). <b>Lead manual REAL</b> também cai — mas recebe no disparo real, use com consciência. Quem responde "SAIR" sai da lista na hora (opt-out automático, LGPD). As demais respostas chegam na aba WhatsApp — feche você mesmo, é a parte humana que vende. 😉 "Apagar TODOS" pede a palavra APAGAR e é irreversível.</p>
       </div>
     </div>
   </section>
@@ -439,77 +442,31 @@ async function clearTests(){
   }catch(e){ showErr('Limpar testes: '+e.message); }
 }
 $('#btnClearTests').onclick = clearTests;
-async function enqueueAll(){ try{ await j('/api/prospect/enqueue-all',{body:{}}); loadLeads(); loadStatus(); }catch(e){ showErr('Fila: '+e.message); } }
-async function toggleRun(){
+
+// v13.8: lead manual REAL — entra na fila do disparo REAL (categoria opcional).
+async function addRealLead(){
+  const name = $('#testName').value.trim();
+  const phone = $('#testPhone').value.replace(/\D/g,'');
+  if(!name||!phone) return alert('Preencha nome e telefone (55 + DDD + número)');
+  if(!confirm('Lead REAL: entra na fila e recebe no DISPARO REAL (não no 🧪 teste). Continuar?')) return;
   try{
-    const starting = $('#statusBadge').textContent !== 'DISPARANDO';
-    if (starting && !confirm('DISPARO REAL: vai enviar para TODOS os leads na fila (inclui os do Google). Se a intenção era testar, use o botão 🧪. Continuar?')) return;
-    await j('/api/prospect/control',{body:{action: starting?'start':'stop'}});
-    loadStatus();
-  }catch(e){ showErr('Disparo: '+e.message); }
-}
-async function runTest(){
-  try{
-    if(!confirm('MODO TESTE: só os leads com categoria "teste manual" vão receber. Leads reais na fila ficam intocados. Continuar?')) return;
-    await j('/api/prospect/control',{body:{action:'start-test'}});
-    loadStatus();
-  }catch(e){ showErr('Disparo teste: '+e.message); }
-}
-async function saveTpl(){
-  try{
-    const r = await j('/api/prospect/template',{body:{template: $('#tpl').value}});
-    let imgMsg = '';
-    try { const ri = await j('/api/prospect/image',{body:{url: $('#tplImg').value.trim()}}); if (ri.ok) imgMsg = ' (imagem do disparo atualizada)'; }
-    catch(e2){ imgMsg = ' — atenção: a imagem NÃO foi salva ('+e2.message+')'; }
-    alert(r.ok ? 'Mensagem salva no servidor! ✅ Para conferir: esvazia o campo e clica em Recarregar — deve voltar exatamente esta mensagem.' + imgMsg : r.error);
-  }catch(e){ showErr('Mensagem: '+e.message); }
-}
-$('#btnSearch').onclick = search;
-$('#btnImport').onclick = importSel;
-$('#btnEnqueue').onclick = enqueueAll;
-$('#btnToggle').onclick = toggleRun;
-$('#btnTest').onclick = runTest;
-$('#btnTpl').onclick = saveTpl;
-$('#btnReloadProsp').onclick = async () => {
-  try{
-    const s = await j('/api/prospect/status',{method:'GET'});
-    $('#tpl').value = s.template; // força: mostra EXATAMENTE o que o servidor tem guardado
-    if (s.image_url !== undefined) $('#tplImg').value = s.image_url || '';
+    const category = $('#manualCat').value.trim();
+    await j('/api/prospect/leads/manual',{body:{name, phone, category, real:true}});
+    $('#testName').value=''; $('#testPhone').value=''; $('#manualCat').value='';
     loadLeads(); loadStatus();
-  }catch(e){ showErr('Recarregar: '+e.message); }
-};
-
-/* ================= MÉTRICAS (aba v13.5) ================= */
-const PROSP_LABELS = {novo:'Novos (importados)', fila:'Na fila', enviado:'Enviados', respondeu:'Responderam', optout:'Opt-out (sairam)', descartado:'Descartados'};
-async function loadMetrics(){
-  try{
-    const m = await j('/api/metrics',{method:'GET'});
-    $('#m-contatos').textContent = m.contatos;
-    $('#m-conv7').textContent = m.conversas_7d;
-    $('#m-taxa').textContent = m.taxa_resposta + '%';
-    $('#m-disparos').textContent = m.disparos_hoje;
-    $('#m-agend').textContent = m.agendamentos_futuros;
-    $('#m-msgs').textContent = `${m.msgs_in_7d} ▼ · ${m.msgs_out_7d} ▲`;
-    $('#m-pipe').textContent = fmt(Number(m.pipeline_cents||0));
-    $('#m-deals').textContent = `${m.deals_abertos} negócios abertos`;
-    $('#m-optout').textContent = m.opt_outs;
-    const p = m.prospeccao||{};
-    $('#prospBody').innerHTML = Object.keys(PROSP_LABELS).map(s=>
-      `<tr><td><span class="tag ${s}">${PROSP_LABELS[s]}</span></td><td><b>${p[s]||0}</b></td></tr>`).join('');
-  }catch(e){ showErr('Métricas: '+e.message); }
+    alert('Lead REAL na fila 🔥 — recebe no próximo minuto se o disparo REAL estiver ligado.');
+  }catch(e){ showErr('Lead real: '+e.message); }
 }
+$('#btnAddManual').onclick = addRealLead;
 
-// polling leve: novas sugestões de IA + threads + métricas frescas
-setInterval(async ()=>{ try{ await loadThreads(); if(curThread){ const t=(await j('/api/threads',{method:'GET'})).find(x=>x.id===curThread); if(t&&t.next_suggestion) addSugg(t.next_suggestion,t.suggestion_reason);} }catch(e){/* polling silencioso */} }, 8000);
-setInterval(()=>{ try{ loadStatus(); loadMetrics(); }catch(e){} }, 60000);
-
-(async ()=>{ try{
-    await Promise.all([loadFunil(), loadContatos(), loadThreads(), loadStatus(), loadMetrics()]);
-    const h = await j('/api/health',{method:'GET'});
-    $('#health').textContent = h.ok ? '● conectado' : '● offline';
-    if (location.hash === '#prosp') document.querySelector('nav button[data-v="prosp"]').click();
-  }catch(e){ showErr('Carga inicial: '+e.message); $('#health').textContent = '● offline'; }
-})();
-</script>
-</body>
-</html>
+// v13.8: apagar TODOS os leads (reais + teste) — destrutivo, exige digitar APAGAR.
+async function clearAllLeads(){
+  const w = prompt('⚠️ Isto apaga TODOS os leads: reais do Google E de teste. Irreversível.\nPara confirmar, digite APAGAR:');
+  if (w !== 'APAGAR') return;
+  try{
+    const r = await j('/api/prospect/leads/clear-all',{body:{}});
+    alert(`Todos os leads apagados: ${r.removed}`);
+    loadLeads(); loadStatus();
+  }catch(e){ showErr('Apagar todos: '+e.message); }
+}
+$('#btnClearAll').onclick
