@@ -21,6 +21,13 @@
  *       (o webhook passa a usá-los na v13.6.2).
  * v13.6.3: detectEscalation pega também "atrasou/atraso" — a bateria interna
  *       (34 casos com as frases do testador) pegou a falha; 34/34 aprovados.
+ * v13.6.4: PREÇO SÓ QUANDO PEDEM (feedback real de cliente: "fracione os
+ *       temas, envie preços separados, mensagens mais curtas") — a tabela
+ *       SAIU da persona fixa e só entra na resposta quando a última
+ *       mensagem do cliente trata de valor (preço, orçamento, condição,
+ *       valor, pagamento, desconto…) — detetor puro detectPriceIntent()
+ *       + o caminho da oferta elegante ("quer que eu te mande a tabela?").
+ *       Sem pedido de valor = resposta sem número nenhum.
  */
 import OpenAI from 'openai';
 
@@ -102,7 +109,7 @@ QUEM VOCÊ É (seu nível):
 COMO VOCÊ VENDE (a regra mais importante de todas):
 - Você NÃO vende: você oferece solução. NUNCA pressiona, NUNCA pede fechamento, NUNCA repete pergunta de "quer fechar?".
 - Primeiro você EXPLORA a conversa com paciência: ouve, pergunta como o negócio da pessoa funciona hoje, como ela atende no WhatsApp, o que dá trabalho, o que ela já tentou. Uma pergunta por vez, com interesse genuíno.
-- Você ABASTECE: deixa a pessoa 100% informada — o que o sistema faz, como funciona a implantação, quanto custa (sempre pela tabela abaixo, com segurança).
+- Você ABASTECE: deixa a pessoa 100% informada — o que o sistema faz, como funciona a implantação, quanto custa (pelos valores oficiais — MAS obedeça a REGRA DOS VALORES, mais abaixo: números só quando a pessoa pedir).
 - A decisão é 100% da pessoa. Quando ela demonstrar interesse, você oferece a demonstração gratuita: "posso agendar uma demonstração de 30 minutinhos, sem compromisso — o ${BUSINESS.owner} te mostra tudo funcionando". Oferece UMA vez; se a pessoa não responder ou enrolar, você deixa a porta aberta: "qualquer coisa, estou por aqui 😊" — e para de insistir.
 - DESCONTO E NEGOCIAÇÃO (volume, "fechando hoje à vista", faturar em 30/60 dias, contrato anual, "o concorrente X está 15% mais barato, vocês batem?"): você NUNCA inventa condição e NUNCA entra em guerra de preço. Coleta os dados (quantidade, condição, prazo) e responde: "deixo sua demanda registrada e o ${BUSINESS.owner} mesmo te responde sobre isso, combinado?".
 - CONCORRENTE: você NUNCA critica, NUNCA fala mal e NUNCA confirma afirmações sobre outros fornecedores — nem sobre o atendimento, nem sobre preço. Fala do que vocês entregam de verdade e volta ao assunto.
@@ -142,8 +149,11 @@ COMO VOCÊ ESCREVE (regras de ouro):
 11. URGÊNCIA ("é urgente mesmo", "preciso amanhã", "estou comparando 3 fornecedores hoje"): acolha, priorize, registre o prazo da pessoa e avise que o ${BUSINESS.owner} responde o quanto antes — sem prometer hora que você não pode cumprir.
 12. Reclamação leve ou "para de me mandar mensagem" sem pedir descadastro formal: acolha com sinceridade — "entendo de verdade, e me desculpo pelo incômodo." Se ficar claro que a pessoa não quer mais receber contato, diga que ela pode pedir o descadastro que é imediato — e não insista.
 
-TABELA DE SERVIÇOS E VALORES (${BUSINESS.name}) — você sabe de cor:
-${CATALOG_TEXT}
+REGRA DOS VALORES (v13.6.4 — preço é conversa, não spam):
+- NUNCA cite valores espontaneamente. Se a mensagem da pessoa NÃO trata de valor (preço, orçamento, condição, valor, pagamento, desconto, investimento…), sua resposta NÃO contém número nenhum.
+- Se a pessoa demonstrar curiosidade de valor sem perguntar direto ("tem uns valores?", "como seria o investimento?"), ofereça com classe: "quer que eu te mande a tabela de valores? 😊" — e só envie quando ela disser que sim.
+- Quando a pessoa PEDE valor, apresente a tabela que vier no bloco TABELA DE VALORES da mensagem de forma LIMPA e SEPARADA: uma linha por item, sem misturar com outros assuntos, no máximo 1 frase sua antes ou depois. Quem conserta esse tom é quem compra: "envie preços separados, mensagens mais curtas".
+- A tabela é a ÚNICA fonte de valores. Nunca invente, nunca arredonde, nunca dê desconto (regra de negociação acima).
 
 FAQ — as respostas do dia a dia (fonte da verdade junto com a tabela):
 ${FAQ_TEXT}
@@ -206,12 +216,29 @@ export async function suggestReply(messages, contactContext = {}) {
     .slice(-10)
     .map(m => `${m.direction === 'in' ? 'CLIENTE' : 'ATENDENTE'}: ${m.body}`)
     .join('\n');
+  // v13.6.4: valores SÓ entram quando a conversa pede valor —
+  // ou quando o cliente aceita a oferta "quer que eu te mande a tabela?".
+  const ins = messages.filter(m => m.direction === 'in');
+  const lastIn = ins[ins.length - 1]?.body || '';
+  const lastOut = [...messages].reverse().find(m => m.direction === 'out')?.body || '';
+  const normIn = String(lastIn).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+  const saidSim = /^(sim|ss|s|quero|quero sim|pode|pode sim|manda|manda sim|claro|claro que sim|ok|bora|vamos|com certeza|fechou|aceito)\b/i.test(normIn);
+  const offeredTable = /tabela de valores|mandar a tabela|enviar a tabela/i.test(lastOut);
+  const wantPrice = detectPriceIntent(lastIn) || (offeredTable && saidSim);
+  const priceBlock = wantPrice
+    ? `
+
+     TABELA DE VALORES (${BUSINESS.name}) — a pessoa pediu valor: apresente-a LIMPA e SEPARADA (uma linha por item, sem misturar assuntos):
+     ${CATALOG_TEXT}`
+    : `
+
+     SEM VALORES NESTA RESPOSTA: a pessoa não pediu preço/valor/orçamento — NÃO cite número algum; se sentir curiosidade de valor, ofereça: "quer que eu te mande a tabela de valores? 😊".`;
   const out = await chat(
     BASE,
-    `${personaPrompt()}
+    `${personaPrompt()}${priceBlock}
 
      Escreva UMA mensagem de WhatsApp como ${BUSINESS.attendant} respondendo à última mensagem da pessoa.
-     REGRA DE OURO: a pessoa pode mandar várias perguntas de uma vez — responda TODAS em UMA única mensagem, na ordem em que foram perguntadas, com transições naturais de conversa (nunca em várias mensagens).
+     REGRA DE OURO: mensagem CURTA (1 a 3 frases), respondendo tudo o que foi perguntado em UMA única mensagem, na ordem, com transições naturais (nunca em várias mensagens) — EXCETO quando incluir a TABELA DE VALORES: aí a resposta é a tabela limpa + no máximo 1 frase sua.
      Comece reconhecendo o que a pessoa disse na abertura (saudação, origem, elogio — ex.: "que bom que nos encontrou!") antes de responder ao conteúdo.
      Responda SOMENTE com o texto da mensagem, sem aspas e sem explicação.`,
     `Dados do contato no CRM: ${JSON.stringify(contactContext)}
@@ -308,4 +335,17 @@ export function detectEscalation(text) {
     .trim();
   if (!t) return false;
   return /pessoa de verdade|pessoas de verdade|humano de verdade|atendente humana|falar com (um|uma|o|a) (humano|pessoa|gerente|dono|responsavel|vendedor|supervisor)|\bgerente\b|\bprocon\b|advogad|dinheiro de volta|\bgolpe\b|\broubo\b|processar|cancelar meu pedido|pedido atrasad|encomenda atrasad|trincad|quebrad|com defeito|produto errado|diferente do que pedi|diferente do que eu pedi|atrasou|atraso|concorrente/i.test(t);
+}
+
+/** v13.6.4: true = a mensagem trata de VALOR (preço, orçamento, condição,
+ *  valor, tabela, pagamento, desconto, "quanto custa"…). Detetor puro
+ *  (custo zero) — decide se a TABELA DE VALORES entra na resposta. */
+export function detectPriceIntent(text) {
+  const t = String(text || '').toLowerCase().normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\w\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!t) return false;
+  return /\bpreco\b|\bprecos\b|\bvalor\b|\bvalores\b|\borcament|\bcondicao\b|\bcondicoes\b|\btabela\b|quanto custa|quanto sai|quanto fica|quanto seria|\bcusta\b|\binvestimento\b|\bdesconto\b|\bpromocao\b|\bparcelad|\ba vista\b|\bpagament|\bcaro\b|\bbarato\b/i.test(t);
 }
