@@ -165,6 +165,20 @@ pre{white-space:pre-wrap;font-family:inherit;font-size:13px;line-height:1.5}
     </div>
     <div class="card" style="margin-bottom:14px">
       <h2>2 · Mensagem de abordagem (use {nome} e {categoria}) — imagem opcional do disparo</h2>
+           <div class="card" style="margin-bottom:14px">
+      <h2>1 · Buscar negócios no Google</h2>
+      <div class="inner">
+        <div class="row">
+          <input type="text" id="q" placeholder='ex.: "salão de beleza em Aracaju" ou "bares em Aracaju"'>
+          <button class="btn btn-ai" id="btnSearch">Buscar</button>
+        </div>
+        <div id="cands" style="margin-top:10px"></div>
+        <div class="row" style="margin-top:10px">
+          <button class="btn" id="btnImport">Importar selecionados (com telefone)</button>
+          <span class="muted">5.000 buscas/mês grátis no plano atual do Google — use sem medo.</span>
+        </div>
+      </div>
+    </div>
       <div class="inner">
         <textarea id="tpl"></textarea>
         <input type="text" id="tplImg" placeholder="URL da imagem para anexar no disparo (opcional — ex.: https://…/proposta-b.jpg). Vazia = envia só texto." style="width:100%;margin-top:8px;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:13px;outline:none;background:#FAF9FE;color:var(--ink);font-family:inherit">
