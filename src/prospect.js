@@ -28,6 +28,11 @@
  *        Environment (padrão: liberado). Com PROSPECT_WINDOW=0-24 o disparo
  *        roda 24h todos os dias. Para voltar ao modo profissional sem tocar
  *        em código: BLOCK_SUNDAY=true + PROSPECT_WINDOW=9-19 + Deploy.
+ * v13.8: GESTÃO DE LEADS (4 botões no painel) — /leads/manual ganhou
+ *        { real: true }: cria lead MANUAL REAL (categoria opcional, entra na
+ *        fila do disparo real; sem 'real' segue sendo lead de 🧪 teste).
+ *        Nova rota /leads/clear-all: apaga TODOS os leads (reais + teste),
+ *        com confirmação digitada "APAGAR" no painel.
  */
 import express from 'express';
 import { query } from './db.js';
@@ -240,18 +245,22 @@ export function mountProspect(app) {
 
   router.post('/leads/manual', async (req, res) => {
     // v13.5.5: lead de teste JÁ NASCE NA FILA — adicionou, está pronto p/ o 🧪.
-    // (sem precisar do "Colocar todos os novos", que mistura leads reais)
+    // v13.8: { real: true } → lead MANUAL REAL (entra na fila do disparo REAL,
+    // com categoria opcional — padrão "negócio local"); sem 'real' → lead de
+    // TESTE (só recebe no modo 🧪), exatamente como antes.
     try {
-      const { name, phone } = req.body;
+      const { name, phone, category, real } = req.body;
       if (!name || !phone) return res.status(400).json({ error: 'informe nome e telefone' });
       const digits = String(phone).replace(/\D/g, '');
       if (digits.length < 10) return res.status(400).json({ error: 'telefone inválido (use 55 + DDD + número)' });
+      const cat = real ? (String(category || '').trim() || 'negócio local') : 'teste manual';
+      const src = real ? 'manual' : 'teste-manual';
       const r = await query(
         `INSERT INTO prospect_leads (place_id, name, category, phone, source_query, status)
-         VALUES ($1,$2,$3,$4,'teste-manual','fila')
-         ON CONFLICT (place_id) DO UPDATE SET name = $2, phone = $4, status = 'fila'
+         VALUES ($1,$2,$3,$4,$5,'fila')
+         ON CONFLICT (place_id) DO UPDATE SET name = $2, category = $3, phone = $4, source_query = $5, status = 'fila'
          RETURNING *`,
-        [`manual-${digits}`, name, 'teste manual', digits]
+        [`manual-${digits}`, name, cat, digits, src]
       );
       res.json(r.rows[0]);
     } catch (e) { res.status(500).json({ error: String(e.message) }); }
@@ -263,6 +272,16 @@ export function mountProspect(app) {
     try {
       const r = await query(`DELETE FROM prospect_leads WHERE source_query = 'teste-manual' RETURNING id`);
       console.log('[prospect] 🧹 leads de teste apagados:', r.rowCount);
+      res.json({ removed: r.rowCount });
+    } catch (e) { res.status(500).json({ error: String(e.message) }); }
+  });
+
+  router.post('/leads/clear-all', async (_req, res) => {
+    // v13.8: apaga TODOS os leads — reais E de teste. Destrutivo: o painel
+    // exige digitar "APAGAR"; a rota fica atrás do login do painel.
+    try {
+      const r = await query(`DELETE FROM prospect_leads RETURNING id`);
+      console.log('[prospect] 🗑️ TODOS os leads apagados:', r.rowCount);
       res.json({ removed: r.rowCount });
     } catch (e) { res.status(500).json({ error: String(e.message) }); }
   });
