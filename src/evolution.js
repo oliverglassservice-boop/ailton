@@ -11,11 +11,12 @@
  * ao da Uazapi (key.remoteJid, message.conversation...), então o parser fica
  * quase igual, com filtros extras de broadcast/status.
  *
- * v13.9: MODO TRADUTOR — sendAudio(number, bufferOuBase64) envia a resposta
- * como mensagem de VOZ: tenta o endpoint dedicado /message/sendAudio/{instance}
- * (base64) e refaz no /message/sendMedia/{instance} (mediatype 'audio').
- * Mesmo padrão de robustez do sendImage (tentativa dupla). O áudio nasce do
- * TTS da OpenAI em memória (mp3) — nada de URL pública no meio do caminho.
+ * v13.12: MODO TRADUTOR/EMBAIXADOR falam por áudio — sendAudio(number, audioUrl)
+ *       recebe a URL PÚBLICA do mp3 (o server.js hospeda em /media/<token>.mp3):
+ *       os logs da própria instância provaram que /message/sendAudio NÃO existe
+ *       aqui (404) e base64 no corpo quebra ("url or base64") — URL vence.
+ *       + sendTyping() acende o "digitando..." (POST /chat/sendPresence).
+ *       + delay de digitação 800 → 300ms (mensagens saem mais rápido).
  */
 const BASE = (process.env.EVOLUTION_URL || '').replace(/\/$/, '');
 const KEY = process.env.EVOLUTION_API_KEY;
@@ -25,13 +26,27 @@ function headers() {
   return { 'Content-Type': 'application/json', apikey: KEY };
 }
 
+/** v13.12: indicador "digitando..." — POST /chat/sendPresence/{instance}
+ *  (presence: 'composing'), no formato da Evolution v2.3. Falha em silêncio:
+ *  é cosmético, e nunca pode derrubar o atendimento. */
+export async function sendTyping(number) {
+  const jid = number.includes('@') ? number : `${number}@s.whatsapp.net`;
+  try {
+    await fetch(`${BASE}/chat/sendPresence/${INSTANCE}`, {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({ number: jid, presence: 'composing' }),
+    });
+  } catch (_) { /* indicador é cosmético — nunca derruba o atendimento */ }
+}
+
 /** Envia texto (Evolution v2: POST /message/sendText/{instance}). */
 export async function sendText(number, text) {
   const jid = number.includes('@') ? number : `${number}@s.whatsapp.net`;
   const res = await fetch(`${BASE}/message/sendText/${INSTANCE}`, {
     method: 'POST',
     headers: headers(),
-    body: JSON.stringify({ number: jid, text, delay: 800, linkPreview: true }),
+    body: JSON.stringify({ number: jid, text, delay: 300, linkPreview: true }),
   });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
@@ -49,7 +64,7 @@ export async function sendText(number, text) {
  */
 export async function sendImage(number, mediaUrl, caption = '') {
   const jid = number.includes('@') ? number : `${number}@s.whatsapp.net`;
-  const base = { number: jid, caption, delay: 800 };
+  const base = { number: jid, caption, delay: 300 };
   let res = await fetch(`${BASE}/message/sendMedia/${INSTANCE}`, {
     method: 'POST',
     headers: headers(),
@@ -70,32 +85,24 @@ export async function sendImage(number, mediaUrl, caption = '') {
 }
 
 /**
- * v13.10: Envia ÁUDIO/VOZ (o "Modo Tradutor" fala com o aluno) — aceita Buffer
- * ou base64 cru. O TTS da OpenAI devolve mp3 em memória, então evitamos
- * hospedar arquivo público: o áudio viaja como base64 no próprio corpo.
- *
- * CORREÇÃO do 400 da Evolution (TypeError "Received type bool"): versões da
- * Evolution diferem no formato que aceitam, e a v13.9 sobrescrevia a resposta
- * da 1ª tentativa — ficávamos cegos. Agora é uma CADEIA de 4 tentativas,
- * LOGANDO cada uma (status + corpo) para nunca mais faltar diagnóstico:
- *   1) /message/sendAudio com base64 cru (formato clássico)
- *   2) /message/sendAudio com data-URI (data:audio/mpeg;base64,...)
- *   3) /message/sendMedia mediatype 'audio' SEM booleanos no corpo (sem ptt)
- *   4) /message/sendMedia mediatype 'audio' com ptt: true (bolha de voz)
- * A primeira que responder ok ganha; se todas falharem, o server.js cai no
- * fallback de texto (que já funciona).
+ * v13.12: Envia ÁUDIO/VOZ (o "Modo Tradutor" e o "Modo Embaixador" falam).
+ * Evidência dos logs DESTA instância (v13.10): /message/sendAudio NÃO
+ * existe aqui (404 "Cannot POST") e base64 no corpo quebra dentro da
+ * Evolution ("Received type bool" / "Owned media must be a url or
+ * base64") — a própria mensagem de erro diz o formato aceito: URL.
+ * Contrato: sendAudio(number, audioUrl) — recebe a URL PÚBLICA do mp3
+ * (o server.js v13.9.3+ hospeda o arquivo por 5 min em /media/<token>.mp3)
+ * e faz a cadeia: 1º sendMedia mediatype 'audio' com ptt: true (bolha de
+ * voz); se falhar, de novo SEM ptt (áudio comum). Cada tentativa logada.
  */
-export async function sendAudio(number, bufferOuBase64) {
+export async function sendAudio(number, audioUrl) {
   const jid = number.includes('@') ? number : `${number}@s.whatsapp.net`;
-  const audio = Buffer.isBuffer(bufferOuBase64)
-    ? bufferOuBase64.toString('base64')
-    : String(bufferOuBase64).replace(/^data:\w+\/\w+;base64,/, '');
-  const mime = 'audio/mpeg';
+  if (typeof audioUrl !== 'string' || !/^https?:\/\//.test(audioUrl)) {
+    throw new Error('sendAudio v13.12 espera URL pública do mp3 (server.js gera /media/<token>.mp3)');
+  }
   const tentativas = [
-    [`/message/sendAudio/${INSTANCE}`, { number: jid, audio, delay: 800 }],
-    [`/message/sendAudio/${INSTANCE}`, { number: jid, audio: `data:${mime};base64,${audio}`, delay: 800 }],
-    [`/message/sendMedia/${INSTANCE}`, { number: jid, mediatype: 'audio', media: audio, delay: 800 }],
-    [`/message/sendMedia/${INSTANCE}`, { number: jid, mediatype: 'audio', media: `data:${mime};base64,${audio}`, ptt: true, delay: 800 }],
+    [`/message/sendMedia/${INSTANCE}`, { number: jid, mediatype: 'audio', media: audioUrl, ptt: true, delay: 300 }],
+    [`/message/sendMedia/${INSTANCE}`, { number: jid, mediatype: 'audio', media: audioUrl, delay: 300 }],
   ];
   let ultimoErro = '';
   for (let i = 0; i < tentativas.length; i++) {
@@ -113,7 +120,7 @@ export async function sendAudio(number, bufferOuBase64) {
     ultimoErro = `tentativa ${i + 1} HTTP ${res.status}: ${texto.slice(0, 160)}`;
     console.log(`[sendAudio] ${ultimoErro}`);
   }
-  throw new Error(`Evolution sendAudio esgotou as 4 tentativas — última: ${ultimoErro}`);
+  throw new Error(`Evolution sendAudio esgotou as tentativas — última: ${ultimoErro}`);
 }
 
 /**
