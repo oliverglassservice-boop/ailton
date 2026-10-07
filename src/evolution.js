@@ -70,36 +70,50 @@ export async function sendImage(number, mediaUrl, caption = '') {
 }
 
 /**
- * v13.9: Envia ÁUDIO/VOZ (o "Modo Tradutor" fala com o aluno) — aceita Buffer
+ * v13.10: Envia ÁUDIO/VOZ (o "Modo Tradutor" fala com o aluno) — aceita Buffer
  * ou base64 cru. O TTS da OpenAI devolve mp3 em memória, então evitamos
  * hospedar arquivo público: o áudio viaja como base64 no próprio corpo.
- * Robusto entre versões da Evolution, como o sendImage: 1ª tentativa no
- * endpoint dedicado /message/sendAudio/{instance}; se falhar, refaz no
- * /message/sendMedia/{instance} com mediatype 'audio' (e ptt: true para
- * nascer como mensagem de voz). Mesmo contrato simples: (number, conteúdo).
+ *
+ * CORREÇÃO do 400 da Evolution (TypeError "Received type bool"): versões da
+ * Evolution diferem no formato que aceitam, e a v13.9 sobrescrevia a resposta
+ * da 1ª tentativa — ficávamos cegos. Agora é uma CADEIA de 4 tentativas,
+ * LOGANDO cada uma (status + corpo) para nunca mais faltar diagnóstico:
+ *   1) /message/sendAudio com base64 cru (formato clássico)
+ *   2) /message/sendAudio com data-URI (data:audio/mpeg;base64,...)
+ *   3) /message/sendMedia mediatype 'audio' SEM booleanos no corpo (sem ptt)
+ *   4) /message/sendMedia mediatype 'audio' com ptt: true (bolha de voz)
+ * A primeira que responder ok ganha; se todas falharem, o server.js cai no
+ * fallback de texto (que já funciona).
  */
 export async function sendAudio(number, bufferOuBase64) {
   const jid = number.includes('@') ? number : `${number}@s.whatsapp.net`;
   const audio = Buffer.isBuffer(bufferOuBase64)
     ? bufferOuBase64.toString('base64')
     : String(bufferOuBase64).replace(/^data:\w+\/\w+;base64,/, '');
-  let res = await fetch(`${BASE}/message/sendAudio/${INSTANCE}`, {
-    method: 'POST',
-    headers: headers(),
-    body: JSON.stringify({ number: jid, audio, delay: 800 }),
-  });
-  if (!res.ok) {
-    res = await fetch(`${BASE}/message/sendMedia/${INSTANCE}`, {
-      method: 'POST',
-      headers: headers(),
-      body: JSON.stringify({ number: jid, mediatype: 'audio', media: audio, ptt: true, delay: 800 }),
-    });
+  const mime = 'audio/mpeg';
+  const tentativas = [
+    [`/message/sendAudio/${INSTANCE}`, { number: jid, audio, delay: 800 }],
+    [`/message/sendAudio/${INSTANCE}`, { number: jid, audio: `data:${mime};base64,${audio}`, delay: 800 }],
+    [`/message/sendMedia/${INSTANCE}`, { number: jid, mediatype: 'audio', media: audio, delay: 800 }],
+    [`/message/sendMedia/${INSTANCE}`, { number: jid, mediatype: 'audio', media: `data:${mime};base64,${audio}`, ptt: true, delay: 800 }],
+  ];
+  let ultimoErro = '';
+  for (let i = 0; i < tentativas.length; i++) {
+    const [rota, corpo] = tentativas[i];
+    let res;
+    try {
+      res = await fetch(`${BASE}${rota}`, { method: 'POST', headers: headers(), body: JSON.stringify(corpo) });
+    } catch (eRede) {
+      ultimoErro = `tentativa ${i + 1} falhou na rede: ${eRede?.message || eRede}`;
+      console.log(`[sendAudio] ${ultimoErro}`);
+      continue;
+    }
+    if (res.ok) return res.json();
+    const texto = await res.text().catch(() => '');
+    ultimoErro = `tentativa ${i + 1} HTTP ${res.status}: ${texto.slice(0, 160)}`;
+    console.log(`[sendAudio] ${ultimoErro}`);
   }
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`Evolution sendAudio ${res.status}: ${body.slice(0, 200)}`);
-  }
-  return res.json();
+  throw new Error(`Evolution sendAudio esgotou as 4 tentativas — última: ${ultimoErro}`);
 }
 
 /**
