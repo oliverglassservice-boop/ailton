@@ -1,5 +1,5 @@
 /**
- * NEON CRM — servidor v13.9.1 (multi-provedor WhatsApp: Evolution API | Uazapi).
+ * NEON CRM — servidor v13.9.2 (multi-provedor WhatsApp: Evolution API | Uazapi).
  * Núcleo: contatos, deals, inbox WhatsApp, AI Gateway (OpenAI),
  * Prospecção Ativa (Google Places + disparo com guardrails).
  * v11: login no painel (Basic Auth) + persona de vendas + guarda de horário.
@@ -32,6 +32,9 @@
  *       "sair do tradutor" desliga e devolve a Mariana. O modo é por conversa
  *       (Set em memória) e roda 24h — é o dono estudando, não spam. Opt-out
  *       e escalação continuam valendo ANTES dele.
+ * v13.9.2: CORREÇÃO DA DUPLICAÇÃO — quando o áudio falha e a aula cai
+ *       para texto, o texto sai UMA vez só (bandeira textEnviado); a
+ *       mensagem de correção (✅/🇧🇷) só completa quando a VOZ saiu.
  */
 import express from 'express';
 import path from 'path';
@@ -383,17 +386,18 @@ async function waWebhook(req, res) {
           }
 
           // 1º a VOZ (foco da conversação) — sem áudio possível, cai para texto
+          let textEnviado = false; // v13.9.2: o texto sai UMA vez só (era a duplicação)
           try {
             const buf = await ai.synthesizeSpeech(professor);
             await wa.sendAudio(waNumber, buf);
             await query(`INSERT INTO messages (conversation_id, direction, kind, body) VALUES ($1,'out','audio',$2)`, [conversation.id, professor]);
           } catch (eAud) {
-            console.error('[tradutor] áudio falhou, mando em texto:', eAud.message);
-            try { await wa.sendText(waNumber, professor); } catch (_) { /* segue */ }
+            console.error('[tradutor] áudio falhou, mando em texto UMA vez:', eAud.message);
+            try { await wa.sendText(waNumber, professor); textEnviado = true; } catch (_) { /* segue */ }
             await query(`INSERT INTO messages (conversation_id, direction, kind, body) VALUES ($1,'out','text',$2)`, [conversation.id, professor]);
           }
-          // 2º o TEXTO junto quando há correção (✅) ou tradução (🇧🇷) — para revisar lendo
-          if (/[\u2705\uD83C\uDDE7\uD83C\uDDF7]/.test(professor)) {
+          // 2º o TEXTO de apoio SÓ quando a VOZ saiu e há correção (✅) ou tradução (🇧🇷)
+          if (!textEnviado && /[\u2705\uD83C\uDDE7\uD83C\uDDF7]/.test(professor)) {
             try { await wa.sendText(waNumber, professor); } catch (_) { /* a voz já saiu */ }
           }
           console.log('[tradutor] aula entregue p/ conversa', conversation.id);
@@ -559,7 +563,7 @@ setInterval(async () => {
   } catch (e) { console.error('[lembrete] erro no worker:', e.message); }
 }, 5 * 60 * 1000);
 
-console.log(`[boot] NEON CRM v13.9.1 no ar | provider=${PROVIDER} | AUTO_RESPOND=${process.env.AUTO_RESPOND || '(NÃO definido!)'} | login_painel=${PANEL_USER && PANEL_PASS ? 'ATIVO' : 'desativado'} | janela_IA=${AI_WINDOW[0]}h-${AI_WINDOW[1]}h | opt-out: LIGADO (palavras-chave) | escalação: LIGADA | agenda+lembretes+áudio+métricas: LIGADOS`);
+console.log(`[boot] NEON CRM v13.9.2 no ar | provider=${PROVIDER} | AUTO_RESPOND=${process.env.AUTO_RESPOND || '(NÃO definido!)'} | login_painel=${PANEL_USER && PANEL_PASS ? 'ATIVO' : 'desativado'} | janela_IA=${AI_WINDOW[0]}h-${AI_WINDOW[1]}h | opt-out: LIGADO (palavras-chave) | escalação: LIGADA | agenda+lembretes+áudio+métricas: LIGADOS`);
 app.listen(PORT, () => console.log(`NEON CRM no ar em ${process.env.APP_URL || 'http://localhost:' + PORT}`));
 
 process.on('SIGTERM', () => { pool.end().then(() => process.exit(0)); });
