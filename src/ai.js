@@ -28,6 +28,11 @@
  *       valor, pagamento, desconto…) — detetor puro detectPriceIntent()
  *       + o caminho da oferta elegante ("quer que eu te mande a tabela?").
  *       Sem pedido de valor = resposta sem número nenhum.
+ * v13.9 (parte 2/3): MODO TRADUTOR — o sistema também ensina idiomas ao
+ *       dono: synthesizeSpeech() (voz TTS da OpenAI, mp3 em memória),
+ *       persona do Professor Bilíngue (translatorPrompt) e detetores puros
+ *       detectTranslatorOn()/detectTranslatorOff(). O "quero o tradutor"
+ *       liga a aula; o "sair do tradutor" desliga (server.js parte 3).
  */
 import OpenAI from 'openai';
 
@@ -147,7 +152,7 @@ COMO VOCÊ ESCREVE (regras de ouro):
 9. DADOS DE TERCEIROS ("quem decide é a Marta, do setor de compras — falem com ela"): registre com elegância e peça que a própria pessoa autorize/apresente o contato — dado de terceiro NUNCA vira consenso automático.
 10. E-MAIL E TELEFONE: NUNCA insista. Se a pessoa não quer informar o e-mail ("por que vocês precisam?"), explique em 1 frase (é só para enviar a proposta formal) e SIGA SEM ele. E-mail estranho (abc@@site) ou telefone incompleto (9999-9999): confirme UMA vez, com carinho, e não fique trocando mensagens sobre isso.
 11. URGÊNCIA ("é urgente mesmo", "preciso amanhã", "estou comparando 3 fornecedores hoje"): acolha, priorize, registre o prazo da pessoa e avise que o ${BUSINESS.owner} responde o quanto antes — sem prometer hora que você não pode cumprir.
-12. Reclamação leve ou "para de me mandar mensagem" sem pedir descadastro formal: acolha com sinceridade — "entendo de verdade, e me desculpo pelo incômodo." Se ficar claro que a pessoa não quer mais receber contato, diga que ela pode pedir o descadastro que é imediato — e não insista.
+12. Reclamação leve ou "para de me mandar mensagem" sem pedir descadastro formal: acolha com sinceridade — "entendo de verdade, e me desculpo pelo incômodo." Se ficar claro que a pessoa não quer mais receber contato, diga que ela pode pedir o descadastro que é imediato — e não insiste.
 
 REGRA DOS VALORES (v13.6.4 — preço é conversa, não spam):
 - NUNCA cite valores espontaneamente. Se a mensagem da pessoa NÃO trata de valor (preço, orçamento, condição, valor, pagamento, desconto, investimento…), sua resposta NÃO contém número nenhum.
@@ -159,6 +164,24 @@ FAQ — as respostas do dia a dia (fonte da verdade junto com a tabela):
 ${FAQ_TEXT}
 
 SEU OBJETIVO EM TODA CONVERSA: fazer a pessoa se sentir ouvida, respeitada e bem informada. A venda é consequência de uma conversa boa — nunca o alvo visível dela.`;
+}
+
+/* ------------------------------------------------------------------ */
+/* v13.9 — MODO TRADUTOR: o Professor Bilíngue (conversação primeiro). */
+/* ------------------------------------------------------------------ */
+export function translatorPrompt(studentName = '') {
+  const aluno = studentName ? String(studentName).split(' ')[0] : 'aluno';
+  return `Você é o PROFESSOR BILÍNGUE — professor particular de inglês dentro do WhatsApp do ${BUSINESS.owner} (o aluno se chama ${aluno}). Você só existe dentro do MODO TRADUTOR: enquanto ele estiver ligado, você NÃO é a ${BUSINESS.attendant}, NÃO vende, NÃO agenda e NÃO menciona a ${BUSINESS.name} — você é só professor.
+
+SEU MÉTODO (conversação primeiro):
+1. A aula é uma CONVERSA em inglês: você escreve em inglês natural e gentil, mensagens curtas (1-3 frases), sempre puxando o aluno para falar — pergunta sobre o dia dele, o trabalho, os planos; um assunto puxa o outro.
+2. CORREÇÃO SUTIL (a regra de ouro): quando o aluno erra, PRIMEIRO responda ao que ele quis dizer (a conversa flui), DEPOIS corrija em uma linha: "✅ Mais natural: <frase corrigida>" + explicação em PORTUGUÊS de no máximo 1 frase (o porquê do erro).
+3. TRADUÇÃO apenas quando ajuda: palavra difícil ou expressão nova vira "(🇧🇷 <tradução>)" logo depois de aparecer.
+4. ADAPTE-SE AO NÍVEL: comece simples; conforme o aluno responde bem, aumente a dificuldade e o vocabulário. Nunca humilhe, nunca sobrecarregue — máximo 2 correções por mensagem.
+5. SUA RESPOSTA VAI VIRAR MENSAGEM DE VOZ: escreva para ser FALADO — frases curtas, sem markdown, sem listas, sem emojis além do ✅ (correção) e do 🇧🇷 (tradução).
+6. Se o aluno pedir claramente para sair do modo ("sair do tradutor"), responda SOMENTE: MODO_TRADUTOR_DESLIGADO — o sistema faz a troca de volta para a atendente.
+
+NUNCA invente preço, venda, agenda ou regras do sistema comercial. Aqui você é só professor de idiomas.`;
 }
 
 let client = null;
@@ -259,6 +282,18 @@ export async function transcribeAudio(buffer, filename = 'audio.ogg') {
   return r.text;
 }
 
+/** v13.9 (MODO TRADUTOR): voz da OpenAI (TTS) — devolve Buffer mp3 pronto
+ *  para o sendAudio da Evolution. Voz configurável via OPENAI_TTS_VOICE. */
+export async function synthesizeSpeech(text, voice = process.env.OPENAI_TTS_VOICE || 'alloy') {
+  const r = await getClient().audio.speech.create({
+    model: process.env.OPENAI_TTS_MODEL || 'gpt-4o-mini-tts',
+    voice,
+    input: text,
+    response_format: 'mp3',
+  });
+  return Buffer.from(await r.arrayBuffer());
+}
+
 /** Classificação leve de intenção (barato, roda a cada mensagem recebida). */
 export async function classifyIntent(text) {
   const out = await chat(
@@ -349,3 +384,23 @@ export function detectPriceIntent(text) {
   if (!t) return false;
   return /\bpreco\b|\bprecos\b|\bvalor\b|\bvalores\b|\borcament|\bcondicao\b|\bcondicoes\b|\btabela\b|quanto custa|quanto sai|quanto fica|quanto seria|\bcusta\b|\binvestimento\b|\bdesconto\b|\bpromocao\b|\bparcelad|\ba vista\b|\bpagament|\bcaro\b|\bbarato\b/i.test(t);
 }
+
+/** v13.9 (MODO TRADUTOR): true = o dono quer LIGAR a aula de idiomas. */
+export function detectTranslatorOn(text) {
+  const t = String(text || '').toLowerCase().normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\w\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!t) return false;
+  return /modo tradutor|quero (o |um |o modo )?tradutor|(ligar|ativar|entrar|abrir) (o |o modo )?tradutor|quero praticar (meu )?ingles|quero estudar ingles|professor de ingles|modo ingles|aula de ingles/i.test(t);
+}
+
+/** v13.9 (MODO TRADUTOR): true = o dono quer DESLIGAR a aula. */
+export function detectTranslatorOff(text) {
+  const t = String(text || '').toLowerCase().normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\w\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!t
