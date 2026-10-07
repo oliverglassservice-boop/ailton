@@ -10,6 +10,12 @@
  * A Evolution usa Baileys por baixo — o envelope do webhook é quase idêntico
  * ao da Uazapi (key.remoteJid, message.conversation...), então o parser fica
  * quase igual, com filtros extras de broadcast/status.
+ *
+ * v13.9: MODO TRADUTOR — sendAudio(number, bufferOuBase64) envia a resposta
+ * como mensagem de VOZ: tenta o endpoint dedicado /message/sendAudio/{instance}
+ * (base64) e refaz no /message/sendMedia/{instance} (mediatype 'audio').
+ * Mesmo padrão de robustez do sendImage (tentativa dupla). O áudio nasce do
+ * TTS da OpenAI em memória (mp3) — nada de URL pública no meio do caminho.
  */
 const BASE = (process.env.EVOLUTION_URL || '').replace(/\/$/, '');
 const KEY = process.env.EVOLUTION_API_KEY;
@@ -59,6 +65,39 @@ export async function sendImage(number, mediaUrl, caption = '') {
   if (!res.ok) {
     const body = await res.text().catch(() => '');
     throw new Error(`Evolution sendImage ${res.status}: ${body.slice(0, 200)}`);
+  }
+  return res.json();
+}
+
+/**
+ * v13.9: Envia ÁUDIO/VOZ (o "Modo Tradutor" fala com o aluno) — aceita Buffer
+ * ou base64 cru. O TTS da OpenAI devolve mp3 em memória, então evitamos
+ * hospedar arquivo público: o áudio viaja como base64 no próprio corpo.
+ * Robusto entre versões da Evolution, como o sendImage: 1ª tentativa no
+ * endpoint dedicado /message/sendAudio/{instance}; se falhar, refaz no
+ * /message/sendMedia/{instance} com mediatype 'audio' (e ptt: true para
+ * nascer como mensagem de voz). Mesmo contrato simples: (number, conteúdo).
+ */
+export async function sendAudio(number, bufferOuBase64) {
+  const jid = number.includes('@') ? number : `${number}@s.whatsapp.net`;
+  const audio = Buffer.isBuffer(bufferOuBase64)
+    ? bufferOuBase64.toString('base64')
+    : String(bufferOuBase64).replace(/^data:\w+\/\w+;base64,/, '');
+  let res = await fetch(`${BASE}/message/sendAudio/${INSTANCE}`, {
+    method: 'POST',
+    headers: headers(),
+    body: JSON.stringify({ number: jid, audio, delay: 800 }),
+  });
+  if (!res.ok) {
+    res = await fetch(`${BASE}/message/sendMedia/${INSTANCE}`, {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({ number: jid, mediatype: 'audio', media: audio, ptt: true, delay: 800 }),
+    });
+  }
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Evolution sendAudio ${res.status}: ${body.slice(0, 200)}`);
   }
   return res.json();
 }
