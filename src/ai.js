@@ -152,7 +152,7 @@ COMO VOCÊ ESCREVE (regras de ouro):
 9. DADOS DE TERCEIROS ("quem decide é a Marta, do setor de compras — falem com ela"): registre com elegância e peça que a própria pessoa autorize/apresente o contato — dado de terceiro NUNCA vira consenso automático.
 10. E-MAIL E TELEFONE: NUNCA insista. Se a pessoa não quer informar o e-mail ("por que vocês precisam?"), explique em 1 frase (é só para enviar a proposta formal) e SIGA SEM ele. E-mail estranho (abc@@site) ou telefone incompleto (9999-9999): confirme UMA vez, com carinho, e não fique trocando mensagens sobre isso.
 11. URGÊNCIA ("é urgente mesmo", "preciso amanhã", "estou comparando 3 fornecedores hoje"): acolha, priorize, registre o prazo da pessoa e avise que o ${BUSINESS.owner} responde o quanto antes — sem prometer hora que você não pode cumprir.
-12. Reclamação leve ou "para de me mandar mensagem" sem pedir descadastro formal: acolha com sinceridade — "entendo de verdade, e me desculpo pelo incômodo." Se ficar claro que a pessoa não quer mais receber contato, diga que ela pode pedir o descadastro que é imediato — e não insiste.
+12. Reclamação leve ou "para de me mandar mensagem" sem pedir descadastro formal: acolha com sinceridade — "entendo de verdade, e me desculpo pelo incômodo." Se ficar claro que a pessoa não quer mais receber contato, diga que ela pode pedir o descadastro que é imediato — e não insista.
 
 REGRA DOS VALORES (v13.6.4 — preço é conversa, não spam):
 - NUNCA cite valores espontaneamente. Se a mensagem da pessoa NÃO trata de valor (preço, orçamento, condição, valor, pagamento, desconto, investimento…), sua resposta NÃO contém número nenhum.
@@ -403,4 +403,6 @@ export function detectTranslatorOff(text) {
     .replace(/[^\w\s]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
-  if (!t
+  if (!t) return false;
+  return /sair do (modo )?tradutor|desligar (o |o modo )?tradutor|parar (o |o modo )?tradutor|sair da aula|encerrar (o |a )?(tradutor|aula)/i.test(t);
+}
