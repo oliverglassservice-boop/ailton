@@ -33,6 +33,8 @@
  *       persona do Professor Bilíngue (translatorPrompt) e detetores puros
  *       detectTranslatorOn()/detectTranslatorOff(). O "quero o tradutor"
  *       liga a aula; o "sair do tradutor" desliga (server.js parte 3).
+ * v13.9.1: translatorReply() — a CONVERSA do professor pela mesma porta
+ *       do gateway (o chat com a persona do Professor Bilíngue).
  */
 import OpenAI from 'openai';
 
@@ -182,6 +184,25 @@ SEU MÉTODO (conversação primeiro):
 6. Se o aluno pedir claramente para sair do modo ("sair do tradutor"), responda SOMENTE: MODO_TRADUTOR_DESLIGADO — o sistema faz a troca de volta para a atendente.
 
 NUNCA invente preço, venda, agenda ou regras do sistema comercial. Aqui você é só professor de idiomas.`;
+}
+
+/** v13.9.1: a resposta do Professor Bilíngue (MODO TRADUTOR).
+ *  Mesma porta do gateway — muda a persona e o foco: conversação. */
+export async function translatorReply(messages, studentName = '') {
+  const transcript = messages
+    .slice(-10)
+    .map(m => `${m.direction === 'in' ? 'ALUNO' : 'PROFESSOR'}: ${m.body}`)
+    .join('\n');
+  const out = await chat(
+    BASE,
+    translatorPrompt(studentName),
+    `Conversa da aula até agora:
+     ${transcript}
+
+     Escreva a PRÓXIMA mensagem do professor: conversa em inglês (+ correção sutil com ✅ e tradução 🇧🇷 quando couber), curta e pronta para virar voz. Responda SOMENTE com o texto da mensagem, sem aspas e sem explicação.`,
+    250
+  );
+  return out;
 }
 
 let client = null;
