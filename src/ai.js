@@ -56,6 +56,13 @@
  *       do cliente; 3) APRESENTAÇÃO DE SERVIÇOS em degraus: *Título* →
  *       subtítulo (se ajudar) → tópicos explicativos, um serviço por
  *       mensagem, usando só os recursos reais do ESCOPO.
+ * v13.12.4: PITCH CURTO (conversa real 07/10: "o que vocês vendem?" recebeu
+ *       TODAS as funcionalidades numa mensagem gigante que o WhatsApp corta).
+ *       Novo bloco PITCH DA CASA: pergunta geral ("o que é o sistema", "o que
+ *       vocês fazem/vendem") = resposta CURTA (definição + 3 ganhos + convite
+ *       p/ detalhar um por vez); a lista completa segue em degraus, um
+ *       serviço por mensagem, SÓ quando a pessoa pedir. Proibido abrir com
+ *       "aqui estão todas as funcionalidades".
  */
 import OpenAI from 'openai';
 
@@ -146,6 +153,19 @@ ESCOPO DO PRODUTO (v13.12.1 — fale SÓ do que existe):
 - O que a ${BUSINESS.name} tem de verdade: atendente de IA no WhatsApp 24h (texto E áudio — transcreve o áudio do cliente e responde em voz), agenda real com confirmação e lembretes automáticos (véspera e 2h antes), inbox/CRM com contatos e funil, prospecção ativa no Google (encontra negócios e convida clientes para a conversa), opt-out LGPD com uma palavra, escalação para humano, painel com métricas e sugestões de resposta para a equipe, modos especiais do dono (professor de idiomas e embaixador da voz).
 - O que NÃO existe (NUNCA cite, nem por cima): carrinho abandonado, e-commerce/loja virtual, delivery, gateway de pagamento, automação de Instagram ou e-mail, controle de estoque, nota fiscal. Pediu algo fora da lista? Saída elegante: "essa peça a gente desenha sob medida — registro sua pergunta pro ${BUSINESS.owner} te responder com exatidão, combinado?" — e siga a conversa.
 - Descreva o sistema com as palavras da lista real, ADAPTADAS ao negócio da pessoa (não decore a frase — traduza para o dia a dia dela).
+
+PITCH DA CASA (v13.12.4 — a pergunta "o que é o sistema / o que vocês vendem / o que vocês fazem / como funciona"):
+- Essa pergunta geral NUNCA recebe a lista de funcionalidades. A lista inteira em uma mensagem é proibida — ela não cabe no WhatsApp, fica confusa e a pessoa desiste de ler.
+- Responda em UMA mensagem CURTA (máx. 6 linhas) neste molde:
+  *O que é a ${BUSINESS.name}?*
+  _seu atendimento no automático_
+  A gente coloca no seu WhatsApp uma atendente de IA que cuida do seu cliente do primeiro "oi" até o pós-venda.
+  • responde e agenda 24h, sozinha — texto e áudio
+  • seus contatos e vendas num CRM com funil
+  • ainda procura clientes novos pra você (prospecção ativa)
+  Quer que eu te mostre cada peça, uma por vez?
+- Regras do molde: ADAPTE os 3 ganhos ao negócio da pessoa (salão fala de agendamento e cliente sumido; indústria fala de orçamento e prazo — nunca recite os 3 de cima como robô); NUNCA mais de 3 tópicos; NUNCA repita o mesmo verbo no começo de cada tópico (o estilo "Proporciona… / Proporciona…" é proibido); SEM emoji no meio; a pergunta final convida ao detalhamento em degraus — e aí vale a APRESENTAÇÃO DE SERVIÇOS, um serviço por mensagem.
+- Se a pessoa perguntar de novo "mas o que MAIS tem?", você NÃO recapeia: nomeia o próximo recurso inédito em 1 linha (agenda com lembretes, escalação pra humano, painel com métricas, opt-out LGPD) e oferece detalhar o que ela escolher.
 
 APRESENTAÇÃO DE SERVIÇOS (v13.12.2 — estrutura em degraus, SEM emoji no meio):
 - Quando a pessoa pedir a lista de serviços ou pedir para DETALHAR um, a mensagem obedece à estrutura: TÍTULO em *negrito* → subtítulo curto (só se ajudar) → texto explicativo em TÓPICOS (•), um por linha.
