@@ -1,5 +1,5 @@
 /**
- * NEON CRM — servidor v13.6.2 (multi-provedor WhatsApp: Evolution API | Uazapi).
+ * NEON CRM — servidor v13.9.1 (multi-provedor WhatsApp: Evolution API | Uazapi).
  * Núcleo: contatos, deals, inbox WhatsApp, AI Gateway (OpenAI),
  * Prospecção Ativa (Google Places + disparo com guardrails).
  * v11: login no painel (Basic Auth) + persona de vendas + guarda de horário.
@@ -26,6 +26,12 @@
  *       ("pessoa de verdade", gerente, pós-venda grave, concorrente):
  *       intent='escalacao' fica visível no painel pro Ailton correr pro
  *       inbox. Detetores moram na ai.js (detectOptOut/detectEscalation).
+ * v13.9.1: MODO TRADUTOR — "quero o tradutor" liga a aula de idiomas com o
+ *       Professor Bilíngue: responde preferindo ÁUDIO (voz TTS → sendAudio)
+ *       e manda o TEXTO junto quando há correção (✅) ou tradução (🇧🇷).
+ *       "sair do tradutor" desliga e devolve a Mariana. O modo é por conversa
+ *       (Set em memória) e roda 24h — é o dono estudando, não spam. Opt-out
+ *       e escalação continuam valendo ANTES dele.
  */
 import express from 'express';
 import path from 'path';
@@ -68,6 +74,9 @@ function requirePanelAuth(req, res, next) {
    Resposta automática só dentro desta janela (horário de Aracaju, UTC-3).
    Fora dela, a sugestão fica pronta no painel p/ envio manual. */
 const AI_WINDOW = (process.env.AI_WINDOW || '8-20').split('-').map(Number);
+// v13.9.1: conversas com o MODO TRADUTOR ligado (números). Em memória:
+// reinício do serviço = modo desligado (o aluno liga de novo com 1 comando).
+const translatorMode = new Set();
 function withinAiHours() {
   const now = new Date();
   const h = (now.getUTCHours() + 24 - 3) % 24;
@@ -340,6 +349,59 @@ async function waWebhook(req, res) {
       return;
     }
 
+    // ---- v13.9.1: MODO TRADUTOR (antes da IA comercial; a aula vence) ----
+    if (!msg.fromMe) {
+      try {
+        if (ai.detectTranslatorOn(body)) translatorMode.add(waNumber);
+        const desligando = translatorMode.has(waNumber) &&
+          (ai.detectTranslatorOff(body) || /modo_tradutor_desligado/i.test(body));
+
+        if (translatorMode.has(waNumber)) {
+          await query(`UPDATE thread_state SET intent = 'tradutor', updated_at = now() WHERE conversation_id = $1`, [conversation.id]);
+
+          if (desligando) {
+            translatorMode.delete(waNumber);
+            const bye = 'Modo tradutor desligado! 🎓 Foi bom estudar com você — quando quiser voltar, é só dizer "quero o tradutor". Aqui é a Mariana, à disposação 😊';
+            try { await wa.sendText(waNumber, bye); } catch (_) { /* segue */ }
+            await query(`INSERT INTO messages (conversation_id, direction, kind, body) VALUES ($1,'out','text',$2)`, [conversation.id, bye]);
+            console.log('[tradutor] modo desligado p/ conversa', conversation.id);
+            return;
+          }
+
+          // aula: a próxima fala do Professor Bilíngue
+          const recentT = (await query(
+            `SELECT direction, body FROM messages WHERE conversation_id = $1 ORDER BY created_at DESC LIMIT 10`,
+            [conversation.id])).rows.reverse();
+          const professor = await ai.translatorReply(recentT, contact.name);
+
+          if (/modo_tradutor_desligado/i.test(professor)) {
+            translatorMode.delete(waNumber);
+            const bye2 = 'Aula encerrada! 🎓 Me chama de novo com "quero o tradutor" quando quiser praticar. Aqui é a Mariana 😊';
+            try { await wa.sendText(waNumber, bye2); } catch (_) { /* segue */ }
+            await query(`INSERT INTO messages (conversation_id, direction, kind, body) VALUES ($1,'out','text',$2)`, [conversation.id, bye2]);
+            return;
+          }
+
+          // 1º a VOZ (foco da conversação) — sem áudio possível, cai para texto
+          try {
+            const buf = await ai.synthesizeSpeech(professor);
+            await wa.sendAudio(waNumber, buf);
+            await query(`INSERT INTO messages (conversation_id, direction, kind, body) VALUES ($1,'out','audio',$2)`, [conversation.id, professor]);
+          } catch (eAud) {
+            console.error('[tradutor] áudio falhou, mando em texto:', eAud.message);
+            try { await wa.sendText(waNumber, professor); } catch (_) { /* segue */ }
+            await query(`INSERT INTO messages (conversation_id, direction, kind, body) VALUES ($1,'out','text',$2)`, [conversation.id, professor]);
+          }
+          // 2º o TEXTO junto quando há correção (✅) ou tradução (🇧🇷) — para revisar lendo
+          if (/[\u2705\uD83C\uDDE7\uD83C\uDDF7]/.test(professor)) {
+            try { await wa.sendText(waNumber, professor); } catch (_) { /* a voz já saiu */ }
+          }
+          console.log('[tradutor] aula entregue p/ conversa', conversation.id);
+          return; // no modo aula, a Mariana comercial não entra
+        }
+      } catch (eT) { console.error('[tradutor] erro no modo:', eT.message); }
+    }
+
     // ---- IA em background: intenção + sugestão (+ auto-resposta opcional) ----
     (async () => {
       try {
@@ -497,7 +559,7 @@ setInterval(async () => {
   } catch (e) { console.error('[lembrete] erro no worker:', e.message); }
 }, 5 * 60 * 1000);
 
-console.log(`[boot] NEON CRM v13.6.2 no ar | provider=${PROVIDER} | AUTO_RESPOND=${process.env.AUTO_RESPOND || '(NÃO definido!)'} | login_painel=${PANEL_USER && PANEL_PASS ? 'ATIVO' : 'desativado'} | janela_IA=${AI_WINDOW[0]}h-${AI_WINDOW[1]}h | opt-out: LIGADO (palavras-chave) | escalação: LIGADA | agenda+lembretes+áudio+métricas: LIGADOS`);
+console.log(`[boot] NEON CRM v13.9.1 no ar | provider=${PROVIDER} | AUTO_RESPOND=${process.env.AUTO_RESPOND || '(NÃO definido!)'} | login_painel=${PANEL_USER && PANEL_PASS ? 'ATIVO' : 'desativado'} | janela_IA=${AI_WINDOW[0]}h-${AI_WINDOW[1]}h | opt-out: LIGADO (palavras-chave) | escalação: LIGADA | agenda+lembretes+áudio+métricas: LIGADOS`);
 app.listen(PORT, () => console.log(`NEON CRM no ar em ${process.env.APP_URL || 'http://localhost:' + PORT}`));
 
 process.on('SIGTERM', () => { pool.end().then(() => process.exit(0)); });
