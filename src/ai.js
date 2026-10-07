@@ -35,6 +35,16 @@
  *       liga a aula; o "sair do tradutor" desliga (server.js parte 3).
  * v13.9.1: translatorReply() — a CONVERSA do professor pela mesma porta
  *       do gateway (o chat com a persona do Professor Bilíngue).
+ * v13.12: MODO EMBAIXADOR — o dono fala inglês no WhatsApp, o sistema
+ *       CORRIGE (polishEnglish: inglês natural de negócios, mesmo sentido
+ *       e tom) e devolve a fala correta NA VOZ DELE clonada
+ *       (speakWithClonedVoice via ElevenLabs, mp3 em memória). Detetores
+ *       puros detectEmbaixadorOn()/detectEmbaixadorOff() no padrão da casa
+ *       ("detetores moram na ai.js"). Pré-requisito: clonar a voz no painel
+ *       (server.js v13.12) e salvar ELEVENLABS_VOICE_ID no Environment.
+ *       + COLISÃO OPT-OUT × MODO: "sair do tradutor/embaixador/da aula"
+ *       NÃO é descadastro LGPD (lookahead em detectOptOut) — o teste em
+ *       produção pegou o dono marcado como opt-out ao sair da aula.
  */
 import OpenAI from 'openai';
 
@@ -369,7 +379,10 @@ export async function parseAppointment(messages, contactName) {
 /** true = a pessoa pediu SAIR (descadastro/opt-out). Cobre gíria, inglês
  *  ("STOP"), "não quero mais receber", "me descadastra", "pare de me mandar",
  *  "me tira da lista" etc. — SEM pegar "cancelar meu pedido" (isso é pós-venda,
- *  não descadastro). */
+ *  não descadastro).
+ *  v13.12: "sair do tradutor / do embaixador / da aula" é SAÍDA DE MODO do
+ *  dono — NÃO descadastro. O lookahead poupa esses casos; o "sair" solto
+ *  (ou "quero sair") de cliente continua derrubando tudo aqui. */
 export function detectOptOut(text) {
   const t = String(text || '').toLowerCase().normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -377,7 +390,7 @@ export function detectOptOut(text) {
     .replace(/\s+/g, ' ')
     .trim();
   if (!t) return false;
-  return /\bsair\b|\bdescadastr|\bdesinscrev|\bstop\b|parar de receber|parar de me mandar|parar de mandar|pare de me mandar|parem de me mandar|nao quero mais|nao quero receber|nao quero ser mais|nao recebo mais|remover da lista|me remova|me tira da lista|me tirar da lista|tirar meu numero|apagar meu numero|nao entre em contato|nao me procure|nao me procurar/i.test(t);
+  return /\bsair\b(?!\s*(?:do|da)\s*(?:modo\s*)?(?:tradutor|embaixador|aula))/i.test(t) || /\bdescadastr|\bdesinscrev|\bstop\b|parar de receber|parar de me mandar|parar de mandar|pare de me mandar|parem de me mandar|nao quero mais|nao quero receber|nao quero ser mais|nao recebo mais|remover da lista|me remova|me tira da lista|me tirar da lista|tirar meu numero|apagar meu numero|nao entre em contato|nao me procure|nao me procurar/i.test(t);
 }
 
 /** true = a conversa pede um HUMANO agora (escalação): pediu pessoa de
@@ -403,7 +416,7 @@ export function detectPriceIntent(text) {
     .replace(/\s+/g, ' ')
     .trim();
   if (!t) return false;
-  return /\bpreco\b|\bprecos\b|\bvalor\b|\bvalores\b|\borcament|\bcondicao\b|\bcondicoes\b|\btabela\b|quanto custa|quanto sai|quanto fica|quanto seria|\bcusta\b|\binvestimento\b|\bdesconto\b|\bpromocao\b|\bparcelad|\ba vista\b|\bpagament|\bcaro\b|\bbarato\b/i.test(t);
+  return /\bpreco\b|\bprecos\b|\bvalor\b|\bvalores\b|\borcament\b|\bcondicao\b|\bcondicoes\b|\btabela\b|quanto custa|quanto sai|quanto fica|quanto seria|\bcusta\b|\binvestimento\b|\bdesconto\b|\bpromocao\b|\bparcelad\b|\ba vista\b|\bpagament\b|\bcaro\b|\bbarato\b/i.test(t);
 }
 
 /** v13.9 (MODO TRADUTOR): true = o dono quer LIGAR a aula de idiomas. */
@@ -426,4 +439,89 @@ export function detectTranslatorOff(text) {
     .trim();
   if (!t) return false;
   return /sair do (modo )?tradutor|desligar (o |o modo )?tradutor|parar (o |o modo )?tradutor|sair da aula|encerrar (o |a )?(tradutor|aula)/i.test(t);
+}
+
+/* ------------------------------------------------------------------ */
+/* v13.12 — MODO EMBAIXADOR: o dono fala, o sistema refina, a voz sai  */
+/* dele mesmo. Entrada: áudio do dono (transcrito pelo Whisper, igual  */
+/* ao fluxo da Mariana). Saída: inglês corrigido + áudio na voz        */
+/* clonada — pronto pra encaminhar a chefe, cliente ou amigo.          */
+/* ------------------------------------------------------------------ */
+
+/** v13.12: true = o dono quer LIGAR o modo embaixador. */
+export function detectEmbaixadorOn(text) {
+  const t = String(text || '').toLowerCase().normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\w\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!t) return false;
+  return /modo embaixador|quero (o |um |o modo )?embaixador|(ligar|ativar|entrar|abrir) (o |o modo )?embaixador/i.test(t);
+}
+
+/** v13.12: true = o dono quer DESLIGAR o modo embaixador. */
+export function detectEmbaixadorOff(text) {
+  const t = String(text || '').toLowerCase().normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\w\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!t) return false;
+  return /sair do (modo )?embaixador|desligar (o |o modo )?embaixador|parar (o |o modo )?embaixador|encerrar (o )?embaixador/i.test(t);
+}
+
+/** v13.12: CORRIGE a fala do dono para inglês natural de negócios.
+ *  Ele fala em inglês (ou português, no aperto) — sai a versão correta:
+ *  mesmo sentido, mesmo tom, tamanho de nota de voz.
+ *  Retorna { corrected, notes } — notes são as correções (✅), p/ o texto. */
+export async function polishEnglish(text) {
+  const out = await chat(
+    BASE,
+    `Você é o editor de fala do ${BUSINESS.owner} (executivo brasileiro, indústria do vidro).
+     Ele gravou um áudio que será encaminhado a chefe, cliente ou amigo. Sua função:
+     devolver a MESMA fala em inglês natural e correto, mantendo o sentido, o tom e o tamanho.
+     Regras:
+     - Se o texto veio em inglês: corrija gramática, vocabulário e naturalidade (business english, informal-profissional).
+     - Se o texto veio em português: traduza para inglês natural, da mesma forma.
+     - NÃO mude o conteúdo, NÃO acrescente assuntos, NÃO alongue. Mesma mensagem, bem dita.
+     - NOTAS: no máximo 2 correções, 1 linha cada, curtíssimo.
+     Formato EXATO de resposta (sem markdown, sem aspas):
+     ENGLISH: <a fala corrigida, pronta para ser falada>
+     NOTAS: <"✅ <errado> → <correto> (porquê em até 6 palavras)" ou "nenhuma">`,
+    String(text || '').slice(0, 2000),
+    220
+  );
+  const mEn = out.match(/ENGLISH:\s*([\s\S]*?)(?:\n\s*NOTAS:|$)/i);
+  const mNotas = out.match(/NOTAS:\s*([\s\S]*)/i);
+  return {
+    corrected: (mEn ? mEn[1] : out).trim(),
+    notes: (mNotas ? mNotas[1] : '').trim(),
+  };
+}
+
+/** v13.12: fala o texto NA VOZ CLONADA do dono (ElevenLabs) — mp3 em memória.
+ *  Pré-requisitos (botão 🎤 do painel + Environment):
+ *    ELEVENLABS_API_KEY   — chave da conta (o plano Starter já dá clonagem)
+ *    ELEVENLABS_VOICE_ID  — id da voz clonada do dono
+ *  ELEVENLABS_URL existe só para testes (mock); padrão: api.elevenlabs.io. */
+export async function speakWithClonedVoice(text) {
+  const key = process.env.ELEVENLABS_API_KEY;
+  const voiceId = process.env.ELEVENLABS_VOICE_ID;
+  if (!key || !voiceId) {
+    throw new Error('Voz clonada ainda não configurada: use o botão 🎤 Clonar minha voz no painel e salve ELEVENLABS_VOICE_ID no Environment (com Deploy)');
+  }
+  const r = await fetch(`${process.env.ELEVENLABS_URL || 'https://api.elevenlabs.io'}/v1/text-to-speech/${voiceId}`, {
+    method: 'POST',
+    headers: { 'xi-api-key': key, 'Content-Type': 'application/json', accept: 'audio/mpeg' },
+    body: JSON.stringify({
+      text: String(text || '').slice(0, 2500),
+      model_id: process.env.ELEVENLABS_MODEL || 'eleven_multilingual_v2',
+      voice_settings: { stability: 0.45, similarity_boost: 0.85, style: 0.2, use_speaker_boost: true },
+    }),
+  });
+  if (!r.ok) {
+    const t = await r.text().catch(() => '');
+    throw new Error(`ElevenLabs TTS ${r.status}: ${t.slice(0, 160)}`);
+  }
+  return Buffer.from(await r.arrayBuffer());
 }
