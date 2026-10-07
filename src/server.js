@@ -1,5 +1,5 @@
 /**
- * NEON CRM — servidor v13.9.2 (multi-provedor WhatsApp: Evolution API | Uazapi).
+ * NEON CRM — servidor v13.9.3 (multi-provedor WhatsApp: Evolution API | Uazapi).
  * Núcleo: contatos, deals, inbox WhatsApp, AI Gateway (OpenAI),
  * Prospecção Ativa (Google Places + disparo com guardrails).
  * v11: login no painel (Basic Auth) + persona de vendas + guarda de horário.
@@ -35,6 +35,12 @@
  * v13.9.2: CORREÇÃO DA DUPLICAÇÃO — quando o áudio falha e a aula cai
  *       para texto, o texto sai UMA vez só (bandeira textEnviado); a
  *       mensagem de correção (✅/🇧🇷) só completa quando a VOZ saiu.
+ * v13.9.3: ÁUDIO VIA URL — os logs provaram que esta Evolution não tem
+ *       /message/sendAudio (404) e rejeita/quebra base64 no corpo
+ *       ("Owned media must be a url or base64"). O CRM agora hospeda o
+ *       mp3 do TTS por 5 min numa rota pública de token aleatório
+ *       (GET /media/:token, sem login — como o webhook) e manda a URL
+ *       no sendAudio. A voz lê SÓ a fala (linha 🇧🇷 fora, marcador ✅ fora).
  */
 import express from 'express';
 import path from 'path';
@@ -80,6 +86,11 @@ const AI_WINDOW = (process.env.AI_WINDOW || '8-20').split('-').map(Number);
 // v13.9.1: conversas com o MODO TRADUTOR ligado (números). Em memória:
 // reinício do serviço = modo desligado (o aluno liga de novo com 1 comando).
 const translatorMode = new Set();
+// v13.9.3: mp3s do TTS aguardando envio (token → Buffer), expiram em 5 min.
+// O sendMedia da Evolution exige mídia como "url or base64" — e o base64
+// quebra dentro dela, então a voz viaja por URL pública efêmera.
+const audioUrls = new Map();
+const PUBLIC_BASE = (process.env.APP_URL || 'https://crm.oliverglassservice.com').replace(/\/$/, '');
 function withinAiHours() {
   const now = new Date();
   const h = (now.getUTCHours() + 24 - 3) % 24;
@@ -388,8 +399,17 @@ async function waWebhook(req, res) {
           // 1º a VOZ (foco da conversação) — sem áudio possível, cai para texto
           let textEnviado = false; // v13.9.2: o texto sai UMA vez só (era a duplicação)
           try {
-            const buf = await ai.synthesizeSpeech(professor);
-            await wa.sendAudio(waNumber, buf);
+            // v13.9.3: a voz lê SÓ a fala — sem a linha 🇧🇷 e sem o marcador ✅
+            const fala = professor
+              .split('\n').filter((l) => !/^\s*🇧🇷/.test(l)).join('\n')
+              .replace(/✅\s*Mais natural:\s*/gi, 'Better: ')
+              .replace(/[\u{1F300}-\u{1FAFF}\u2600-\u27BF\uFE0F]/gu, '')
+              .trim();
+            const buf = await ai.synthesizeSpeech(fala);
+            const token = Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
+            audioUrls.set(token, { buf });
+            setTimeout(() => audioUrls.delete(token), 5 * 60 * 1000); // a URL morre sozinha
+            await wa.sendAudio(waNumber, `${PUBLIC_BASE}/media/${token}.mp3`);
             await query(`INSERT INTO messages (conversation_id, direction, kind, body) VALUES ($1,'out','audio',$2)`, [conversation.id, professor]);
           } catch (eAud) {
             console.error('[tradutor] áudio falhou, mando em texto UMA vez:', eAud.message);
@@ -516,6 +536,18 @@ async function waWebhook(req, res) {
 app.post('/webhooks/uazapi', waWebhook);
 app.post('/webhooks/evolution', waWebhook);
 
+/* ---------------- v13.9.3: hospedagem efêmera do áudio (sem login) ----------------
+   A Evolution desta instância só aceita mídia como "url or base64" e o
+   base64 quebra dentro dela — então o mp3 do TTS fica 5 minutos aqui,
+   sob token aleatório (invés de adivinhar), igual ao webhook: sem login.
+   O token expira do Map sozinho — a URL não fica válida para sempre. */
+app.get('/media/:token', (req, res) => {
+  const item = audioUrls.get(String(req.params.token).replace(/\.mp3$/, ''));
+  if (!item) return res.status(404).send('audio expirado');
+  res.setHeader('Content-Type', 'audio/mpeg');
+  res.send(item.buf);
+});
+
 /* ---------------- UI (protegida por login quando configurado) ---------------- */
 app.use(requirePanelAuth);
 // HTML sempre fresco (sem cache de navegador) — evita "painel velho" após Deploy.
@@ -563,7 +595,7 @@ setInterval(async () => {
   } catch (e) { console.error('[lembrete] erro no worker:', e.message); }
 }, 5 * 60 * 1000);
 
-console.log(`[boot] NEON CRM v13.9.2 no ar | provider=${PROVIDER} | AUTO_RESPOND=${process.env.AUTO_RESPOND || '(NÃO definido!)'} | login_painel=${PANEL_USER && PANEL_PASS ? 'ATIVO' : 'desativado'} | janela_IA=${AI_WINDOW[0]}h-${AI_WINDOW[1]}h | opt-out: LIGADO (palavras-chave) | escalação: LIGADA | agenda+lembretes+áudio+métricas: LIGADOS`);
+console.log(`[boot] NEON CRM v13.9.3 no ar | provider=${PROVIDER} | AUTO_RESPOND=${process.env.AUTO_RESPOND || '(NÃO definido!)'} | login_painel=${PANEL_USER && PANEL_PASS ? 'ATIVO' : 'desativado'} | janela_IA=${AI_WINDOW[0]}h-${AI_WINDOW[1]}h | opt-out: LIGADO (palavras-chave) | escalação: LIGADA | agenda+lembretes+áudio+métricas: LIGADOS`);
 app.listen(PORT, () => console.log(`NEON CRM no ar em ${process.env.APP_URL || 'http://localhost:' + PORT}`));
 
 process.on('SIGTERM', () => { pool.end().then(() => process.exit(0)); });
