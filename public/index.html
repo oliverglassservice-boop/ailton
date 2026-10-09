@@ -102,21 +102,28 @@ pre{white-space:pre-wrap;font-family:inherit;font-size:13px;line-height:1.5}
   .kpis,.kpis5{grid-template-columns:repeat(2,1fr)}.msg{max-width:85%}
   .bar input{display:none}
 }
+<style id="brandCss"></style>
+input[type=color].cfg{width:44px;height:32px;padding:0;border:1px solid var(--line);border-radius:8px;background:none;cursor:pointer}
+.cfgrow{display:flex;align-items:center;gap:10px;margin:8px 0}
+.cfgrow label{width:190px;flex:none;font-size:13px;color:var(--muted)}
+.cfgrow input[type=text],.cfgrow textarea{flex:1;border:1px solid var(--line);border-radius:10px;padding:9px 12px;font-family:inherit;font-size:13px;color:var(--ink);background:#fff}
+.cfgrow textarea{min-height:70px;resize:vertical}
 </style>
 </head>
 <body>
 <div id="errbar" onclick="this.style.display='none'" title="Clique para fechar"></div>
 <div class="shell">
 <aside class="side">
-  <div class="logo">◆ <b>MAIS<br>AUTOMAÇÃO</b></div>
+  <div class="logo">◆ <b id="brandLogoText">MAIS<br>AUTOMAÇÃO</b></div>
   <nav>
     <button data-v="funil" class="active"><i>🎯</i> Funil</button>
     <button data-v="contatos"><i>👥</i> Contatos</button>
     <button data-v="wa"><i>💬</i> WhatsApp</button>
     <button data-v="prosp"><i>🧲</i> Prospecção</button>
     <button data-v="metricas"><i>📊</i> Métricas</button>
+    <button data-v="config"><i>⚙️</i> Configurações</button>
   </nav>
-  <div class="status"><span class="ok" id="health">● conectando…</span>v13.8 · NEON CRM</div>
+  <div class="status"><span class="ok" id="health">● conectando…</span><span id="brandVersion">v13.10 · NEON CRM</span></div>
 </aside>
 <div class="maincol">
 <div class="bar">
@@ -232,8 +239,23 @@ pre{white-space:pre-wrap;font-family:inherit;font-size:13px;line-height:1.5}
       </table>
     </div>
   </section>
+  <section class="view" id="v-config">
+    <div class="card">
+      <h2>Configurações — marca do negócio (white-label)</h2>
+      <p style="color:var(--muted);font-size:13px;margin-top:4px">O painel, a IA no WhatsApp e as boas-vindas vestem a roupa do negócio. Campo vazio = volta ao padrão de fábrica.</p>
+      <div class="cfgrow"><label>Nome do negócio</label><input type="text" id="cfg-business" placeholder="Salão de Beleza Dona Flor"></div>
+      <div class="cfgrow"><label>Nome da atendente (IA)</label><input type="text" id="cfg-attendant" placeholder="Flor"></div>
+      <div class="cfgrow"><label>Mensagem de boas-vindas</label><textarea id="cfg-welcome" placeholder="Oi! Você está no Salão Dona Flor 💅 Como posso te ajudar hoje?"></textarea></div>
+      <div class="cfgrow"><label>Persona extra da IA</label><textarea id="cfg-persona" placeholder="Ex.: especialista profissional em salão de beleza, experiente em colorimetria e visagismo…"></textarea></div>
+      <div class="cfgrow"><label>Cor primária</label><input type="color" class="cfg" id="cfg-ai" value="#7C5CFF"><input type="text" id="cfg-ai-hex" value="#7C5CFF" style="width:110px;border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-family:monospace"></div>
+      <div class="cfgrow"><label>Cor da sidebar (topo)</label><input type="color" class="cfg" id="cfg-side" value="#17133A"><input type="text" id="cfg-side-hex" value="#17133A" style="width:110px;border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-family:monospace"></div>
+      <div class="cfgrow"><label>Cor da sidebar (rodapé)</label><input type="color" class="cfg" id="cfg-side2" value="#231C55"><input type="text" id="cfg-side2-hex" value="#231C55" style="width:110px;border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-family:monospace"></div>
+      <div class="cfgrow"><label>Fundo da tela</label><input type="color" class="cfg" id="cfg-bg" value="#F4F2FB"><input type="text" id="cfg-bg-hex" value="#F4F2FB" style="width:110px;border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-family:monospace"></div>
+      <div class="cfgrow"><label></label><button id="cfgSave" style="background:var(--ai);color:#fff;border:none;border-radius:999px;padding:10px 24px;font-weight:700;cursor:pointer">💾 Salvar marca</button><span id="cfgStatus" style="font-size:13px;color:var(--muted)"></span></div>
+    </div>
+  </section>
 </main>
-<footer>NEON CRM ◆ tecnologia Mais Automação — atendimento & prospecção</footer>
+<footer id="brandFooter">NEON CRM ◆ tecnologia Mais Automação — atendimento & prospecção</footer>
 </div>
 </div>
 <script>
@@ -555,6 +577,52 @@ setInterval(()=>{ try{ loadStatus(); loadMetrics(); }catch(e){} }, 60000);
     $('#health').textContent = h.ok ? '● conectado' : '● offline';
     if (location.hash === '#prosp') document.querySelector('nav button[data-v="prosp"]').click();
   }catch(e){ showErr('Carga inicial: '+e.message); $('#health').textContent = '● offline'; }
+})();
+</script>
+<script>
+/* v13.10: WHITE-LABEL — a marca salva na aba Configurações veste o painel
+   (logo, cores, versão, rodapé) e a IA (via /api/branding → app_settings). */
+(function(){
+  const $ = (s) => document.querySelector(s);
+  const F = [['business_name','cfg-business'],['attendant_name','cfg-attendant'],
+             ['welcome_msg','cfg-welcome'],['persona_extra','cfg-persona'],
+             ['brand_ai','cfg-ai'],['brand_side','cfg-side'],
+             ['brand_side2','cfg-side2'],['brand_bg','cfg-bg']];
+  try { TITLES.config = 'Configurações'; } catch (_) {}
+  function apply(b){
+    if (b.business_name){
+      const l=$('#brandLogoText'); if(l) l.textContent=b.business_name.toUpperCase();
+      const v=$('#brandVersion'); if(v) v.textContent='v13.10 · '+b.business_name;
+      const f=$('#brandFooter'); if(f) f.textContent=b.business_name+' — painel de atendimento';
+      document.title=b.business_name+' · Atendimento';
+    }
+    const cs=$('#brandCss');
+    if (cs) cs.textContent = [
+      b.brand_ai ? '--ai:'+b.brand_ai+';--ai-deep:'+b.brand_ai+';' : '',
+      b.brand_side ? '--side:'+b.brand_side+';' : '',
+      b.brand_side2 ? '--side2:'+b.brand_side2+';' : '',
+      b.brand_bg ? '--bg:'+b.brand_bg+';' : ''
+    ].join('');
+    F.forEach(([k,id])=>{ const e=$('#'+id); if(e) e.value=b[k]||''; });
+    const D={ai:['brand_ai','#7C5CFF'],side:['brand_side','#17133A'],side2:['brand_side2','#231C55'],bg:['brand_bg','#F4F2FB']};
+    Object.keys(D).forEach((x)=>{ const e=$('#cfg-'+x); if(e){ e.value=b[D[x][0]]||D[x][1]; const h=$('#cfg-'+x+'-hex'); if(h) h.value=e.value; } });
+  }
+  ['ai','side','side2','bg'].forEach((x)=>{
+    const p=$('#cfg-'+x), h=$('#cfg-'+x+'-hex');
+    if(p&&h){ p.addEventListener('input',()=>h.value=p.value); h.addEventListener('input',()=>p.value=h.value); }
+  });
+  fetch('/api/branding').then(r=>r.json()).then(apply).catch(()=>{});
+  const btn=$('#cfgSave');
+  if (btn) btn.onclick = async () => {
+    const s=$('#cfgStatus'); s.textContent='salvando…';
+    const body={};
+    F.forEach(([k,id])=>{ const e=$('#'+id); if(e) body[k]=e.value.trim(); });
+    try {
+      const j = await fetch('/api/branding',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json());
+      if (j.ok){ apply(j.branding||body); s.textContent='✓ marca salva — painel e IA já estão vestindo a roupa nova'; }
+      else s.textContent='erro: '+(j.error||'?');
+    } catch(e){ s.textContent='erro: '+e.message; }
+  };
 })();
 </script>
 </body>
