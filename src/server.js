@@ -615,7 +615,7 @@ async function waWebhook(req, res) {
                    VALUES ($1,'out','text',$2,$3)`,
                   [conversation.id, suggestion, sent?.id ? String(sent.id) : (sent?.key?.id ? String(sent.key.id) : null)]
                 );
-                await query(`UPDATE conversations SET last_msg_at = now() WHERE id = $1`, [conversation_id]);
+                await query(`UPDATE conversations SET last_msg_at = now() WHERE id = $1`, [conversation.id]);
                 await query(`UPDATE thread_state SET next_suggestion = NULL WHERE conversation_id = $1`,
                   [conversation.id]);
                 console.log('[auto] ✅ resposta enviada automaticamente p/ conversa', conversation.id);
