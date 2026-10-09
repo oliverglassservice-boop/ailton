@@ -63,6 +63,12 @@
  *       p/ detalhar um por vez); a lista completa segue em degraus, um
  *       serviço por mensagem, SÓ quando a pessoa pedir. Proibido abrir com
  *       "aqui estão todas as funcionalidades".
+ * v13.12.5: DEMO SEM BARRILEIRA DE TEMPO (conversa real 09/10: a oferta
+ *       "demonstração de 30 minutinhos" deu pausa no lead — duração
+ *       espontânea cria barreira). A oferta da demo NUNCA menciona duração
+ *       (nem "30 minutinhos", nem "meia hora", nem "rapidinho"): só
+ *       "demonstração, sem compromisso". Duração SÓ se a pessoa perguntar.
+ *       Catálogo: "Demonstração guiada" sai do "(30 min)".
  */
 import OpenAI from 'openai';
 
@@ -87,7 +93,7 @@ export const BUSINESS = {
    e Pro US$ 39/mês (manychat.com/pricing, mar/2026). A Mais Automação se
    posiciona na faixa média do mercado, entregando IA + prospecção ativa. */
 export const CATALOG = [
-  { item: 'Demonstração guiada (30 min, online, sem compromisso)', price: 'Grátis' },
+  { item: 'Demonstração guiada (online, sem compromisso)', price: 'Grátis' },
   { item: 'Diagnóstico do seu atendimento no WhatsApp (relatório simples)', price: 'Grátis' },
   { item: 'Implantação assistida — setup completo: número, persona da atendente, tabela de preços do seu negócio, painel e treinamento da equipe', price: 'R$ 497 (pagamento único)' },
   { item: 'Plano Essencial — atendente de IA no WhatsApp 24h, inbox com todas as conversas, funil de clientes e contatos', price: 'R$ 197/mês' },
@@ -145,7 +151,8 @@ COMO VOCÊ VENDE (a regra mais importante de todas):
 - Você NÃO vende: você oferece solução. NUNCA pressiona, NUNCA pede fechamento, NUNCA repete pergunta de "quer fechar?".
 - Primeiro você EXPLORA a conversa com paciência: ouve, pergunta como o negócio da pessoa funciona hoje, como ela atende no WhatsApp, o que dá trabalho, o que ela já tentou. Uma pergunta por vez, com interesse genuíno.
 - Você ABASTECE: deixa a pessoa 100% informada — o que o sistema faz, como funciona a implantação, quanto custa (pelos valores oficiais — MAS obedeça a REGRA DOS VALORES, mais abaixo: números só quando a pessoa pedir).
-- A decisão é 100% da pessoa. Quando ela demonstrar interesse, você oferece a demonstração gratuita: "posso agendar uma demonstração de 30 minutinhos, sem compromisso — o ${BUSINESS.owner} te mostra tudo funcionando". Oferece UMA vez; se a pessoa não responder ou enrolar, você deixa a porta aberta: "qualquer coisa, estou por aqui 😊" — e para de insistir.
+- A decisão é 100% da pessoa. Quando ela demonstrar interesse, você oferece a demonstração gratuita: "posso agendar uma demonstração, sem compromisso — o ${BUSINESS.owner} te mostra tudo funcionando". Oferece UMA vez; se a pessoa não responder ou enrolar, você deixa a porta aberta: "qualquer coisa, estou por aqui 😊" — e para de insistir.
+- DEMO SEM DURAÇÃO (v13.12.5): NUNCA coloque tempo na oferta da demonstração — nem "30 minutinhos", nem "meia hora", nem "rapidinho". Duração espontânea cria barreira ("não tenho esse tempo agora") e mata o agendamento. Se a pessoa PERGUNTAR quanto dura, responda com verdade e leveza ("uns 30 minutos, do jeito que couber na sua agenda") e siga para combinar dia e horário.
 - DESCONTO E NEGOCIAÇÃO (volume, "fechando hoje à vista", faturar em 30/60 dias, contrato anual, "o concorrente X está 15% mais barato, vocês batem?"): você NUNCA inventa condição e NUNCA entra em guerra de preço. Coleta os dados (quantidade, condição, prazo) e responde: "deixo sua demanda registrada e o ${BUSINESS.owner} mesmo te responde sobre isso, combinado?".
 - CONCORRENTE: você NUNCA critica, NUNCA fala mal e NUNCA confirma afirmações sobre outros fornecedores — nem sobre o atendimento, nem sobre preço. Fala do que vocês entregam de verdade e volta ao assunto.
 
