@@ -1,5 +1,5 @@
 /**
- * NEON CRM — servidor v13.9.3 (multi-provedor WhatsApp: Evolution API | Uazapi).
+ * NEON CRM — servidor v13.9.4 (multi-provedor WhatsApp: Evolution API | Uazapi).
  * Núcleo: contatos, deals, inbox WhatsApp, AI Gateway (OpenAI),
  * Prospecção Ativa (Google Places + disparo com guardrails).
  * v11: login no painel (Basic Auth) + persona de vendas + guarda de horário.
@@ -41,6 +41,16 @@
  *       mp3 do TTS por 5 min numa rota pública de token aleatório
  *       (GET /media/:token, sem login — como o webhook) e manda a URL
  *       no sendAudio. A voz lê SÓ a fala (linha 🇧🇷 fora, marcador ✅ fora).
+ * v13.9.4: VELOCIDADE + MODO EMBAIXADOR — 1) LLMs em PARALELO
+ *       (Promise.all: intenção + resposta num round-trip só — antes em
+ *       fila, 2 esperas seguidas); 2) "digitando..." (sendPresence
+ *       composing) na tela do cliente enquanto a IA pensa; 3) logs de
+ *       tempo ("[ia] intenção + resposta prontas em X ms"); 4) MODO
+ *       EMBAIXADOR: o dono manda a fala, polishEnglish corrige para
+ *       inglês natural e speakWithClonedVoice devolve NA VOZ DELE
+ *       (ElevenLabs) + notas ✅; 5) GUARD: "sair do tradutor/embaixador"
+ *       NUNCA marca opt-out LGPD (bug real de 07/10); 6) 💜 removidos
+ *       das mensagens fixas (regra do dono — vale também para sistema).
  */
 import express from 'express';
 import path from 'path';
@@ -57,6 +67,12 @@ process.on('uncaughtException', (e) => console.error('[uncaughtException]', e?.m
 // ---- Provedor de WhatsApp (mesmo contrato nas duas camadas) ----
 const PROVIDER = (process.env.WHATSAPP_PROVIDER || 'uazapi').toLowerCase();
 const wa = PROVIDER === 'evolution' ? evolution : uazapi;
+
+// v13.9.4: "digitando..." (presence composing) — melhor esforço, nunca trava
+// o fluxo nem loga erro: se o provedor não tiver sendTyping, não faz nada.
+function showTyping(to) {
+  try { Promise.resolve(wa.sendTyping?.(to)).catch(() => {}); } catch (_) {}
+}
 
 const app = express();
 app.use(express.json({ limit: '12mb' })); // webhooks com mídia/base64 podem ser grandes
@@ -86,6 +102,11 @@ const AI_WINDOW = (process.env.AI_WINDOW || '8-20').split('-').map(Number);
 // v13.9.1: conversas com o MODO TRADUTOR ligado (números). Em memória:
 // reinício do serviço = modo desligado (o aluno liga de novo com 1 comando).
 const translatorMode = new Set();
+// v13.9.4: MODO EMBAIXADOR (por conversa, em memória — igual ao tradutor):
+// o dono manda a fala, o sistema corrige em inglês e devolve NA VOZ DELE
+// (clonada via ElevenLabs). "quero o embaixador" liga, "sair do
+// embaixador" desliga. Ferramenta do dono — NUNCA citar como serviço.
+const embaixadorMode = new Set();
 // v13.9.3: mp3s do TTS aguardando envio (token → Buffer), expiram em 5 min.
 // O sendMedia da Evolution exige mídia como "url or base64" — e o base64
 // quebra dentro dela, então a voz viaja por URL pública efêmera.
@@ -346,12 +367,17 @@ async function waWebhook(req, res) {
     // v13.6.2: detetor por PALAVRAS-CHAVE (ai.detectOptOut, custo zero, pega
     // "STOP", "quero parar de receber mensagens de vocês", "me descadastra de
     // tudo", "me tira da lista"…) + palavras-soltas clássicas por segurança.
+    // v13.9.4: GUARD — saída de MODO do dono ("sair do tradutor/embaixador",
+    // "sair da aula") NUNCA é opt-out LGPD. O bug real de 07/10 marcou o
+    // dono por engano ao sair da aula; a saída de modo é tratada nos blocos
+    // de modo logo abaixo — aqui ela simplesmente não derruba o contato.
     const norm = body.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
       .replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
-    if (ai.detectOptOut(body) || /^(sair|parar|pare|parem|descadastrar)$/.test(norm)) {
+    const saidaDeModo = /sair do (modo )?(tradutor|embaixador)|sair da aula/i.test(body);
+    if (!saidaDeModo && (ai.detectOptOut(body) || /^(sair|parar|pare|parem|descadastrar)$/.test(norm))) {
       await query(`UPDATE contacts SET opt_out = TRUE, consent_lgpd = FALSE WHERE id = $1`, [contact.id]);
       await query(`UPDATE prospect_leads SET status = 'optout' WHERE phone = $1`, [waNumber]);
-      const confirmMsg = 'Registrado! A partir de agora não vou mais te mandar mensagem. Se um dia mudar de ideia, estarei por aqui. 💜';
+      const confirmMsg = 'Registrado! A partir de agora não vou mais te mandar mensagem. Se um dia mudar de ideia, estarei por aqui.';
       try {
         await wa.sendText(waNumber, confirmMsg);
         await query(
@@ -383,6 +409,8 @@ async function waWebhook(req, res) {
           }
 
           // aula: a próxima fala do Professor Bilíngue
+          // v13.9.4: "digitando..." na tela do aluno enquanto o professor pensa
+          showTyping(waNumber);
           const recentT = (await query(
             `SELECT direction, body FROM messages WHERE conversation_id = $1 ORDER BY created_at DESC LIMIT 10`,
             [conversation.id])).rows.reverse();
@@ -426,12 +454,78 @@ async function waWebhook(req, res) {
       } catch (eT) { console.error('[tradutor] erro no modo:', eT.message); }
     }
 
+    // ---- v13.9.4: MODO EMBAIXADOR (ferramenta do dono — nunca citar como serviço) ----
+    // Fluxo: fala do dono (áudio transcrito no topo OU texto) → polishEnglish
+    // (inglês natural de negócios, mesmo sentido e tom) → speakWithClonedVoice
+    // (ElevenLabs, voz clonada) → áudio na voz dele + notas ✅ (máx. 2).
+    if (!msg.fromMe) {
+      try {
+        if (ai.detectEmbaixadorOn(body)) {
+          // sem voz clonada configurada → aviso honesto e nem entra no modo
+          if (!process.env.ELEVENLABS_API_KEY || !process.env.ELEVENLABS_VOICE_ID) {
+            const falta = 'O embaixador precisa da sua voz clonada, que ainda não está configurada. Configuro em minutos: conta ElevenLabs + clonagem da voz — quando estiver no ar, o "quero o embaixador" já funciona. Aqui é a Mariana, à disposação 😊';
+            try { await wa.sendText(waNumber, falta); } catch (_) { /* segue */ }
+            await query(`INSERT INTO messages (conversation_id, direction, kind, body) VALUES ($1,'out','text',$2)`, [conversation.id, falta]);
+            console.log('[embaixador] ativação sem voz configurada — aviso enviado p/ conversa', conversation.id);
+            return;
+          }
+          embaixadorMode.add(waNumber);
+          const oiEmb = 'Modo embaixador ligado! 🎙️ Manda a fala (áudio ou texto) que eu devolvo em inglês natural, na SUA voz, pronta pra encaminhar. Pra sair: "sair do embaixador".';
+          try { await wa.sendText(waNumber, oiEmb); } catch (_) { /* segue */ }
+          await query(`INSERT INTO messages (conversation_id, direction, kind, body) VALUES ($1,'out','text',$2)`, [conversation.id, oiEmb]);
+          console.log('[embaixador] modo ligado p/ conversa', conversation.id);
+          return;
+        }
+
+        const desligandoEmb = embaixadorMode.has(waNumber) &&
+          (ai.detectEmbaixadorOff(body) || /modo_embaixador_desligado/i.test(body));
+
+        if (embaixadorMode.has(waNumber)) {
+          await query(`UPDATE thread_state SET intent = 'embaixador', updated_at = now() WHERE conversation_id = $1`, [conversation.id]);
+
+          if (desligandoEmb) {
+            embaixadorMode.delete(waNumber);
+            const byeEmb = 'Modo embaixador desligado! 🎙️ Quando quiser lapidar uma fala em inglês, é só dizer "quero o embaixador". Aqui é a Mariana, à disposação 😊';
+            try { await wa.sendText(waNumber, byeEmb); } catch (_) { /* segue */ }
+            await query(`INSERT INTO messages (conversation_id, direction, kind, body) VALUES ($1,'out','text',$2)`, [conversation.id, byeEmb]);
+            console.log('[embaixador] modo desligado p/ conversa', conversation.id);
+            return;
+          }
+
+          // a fala do dono já está em `body` (áudio transcrito ou texto)
+          showTyping(waNumber);
+          const { corrected, notes } = await ai.polishEnglish(body);
+          try {
+            const bufEmb = await ai.speakWithClonedVoice(corrected);
+            const tokenEmb = Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
+            audioUrls.set(tokenEmb, { buf: bufEmb });
+            setTimeout(() => audioUrls.delete(tokenEmb), 5 * 60 * 1000);
+            await wa.sendAudio(waNumber, `${PUBLIC_BASE}/media/${tokenEmb}.mp3`);
+            await query(`INSERT INTO messages (conversation_id, direction, kind, body) VALUES ($1,'out','audio',$2)`, [conversation.id, corrected]);
+          } catch (eAud) {
+            console.error('[embaixador] áudio falhou, mando em texto:', eAud.message);
+            try { await wa.sendText(waNumber, corrected); } catch (_) { /* segue */ }
+            await query(`INSERT INTO messages (conversation_id, direction, kind, body) VALUES ($1,'out','text',$2)`, [conversation.id, corrected]);
+          }
+          if (notes && !/nenhuma/i.test(notes)) {
+            const notaEmb = `📝 Pronto pra encaminhar\n${notes}`;
+            try { await wa.sendText(waNumber, notaEmb); } catch (_) { /* segue */ }
+          }
+          console.log('[embaixador] fala corrigida entregue p/ conversa', conversation.id);
+          return; // no modo, a Mariana comercial não entra
+        }
+      } catch (eE) { console.error('[embaixador] erro no modo:', eE.message); }
+    }
+
     // ---- IA em background: intenção + sugestão (+ auto-resposta opcional) ----
     (async () => {
       try {
         // v13.5: opt-out vence TUDO — contato marcado nunca mais recebe IA
         const ou = (await query(`SELECT opt_out FROM contacts WHERE id = $1`, [contact.id])).rows[0];
         if (ou?.opt_out) { console.log('[ia] contato opt-out — IA dispensada'); return; }
+
+        // v13.9.4: "digitando..." já na tela do cliente enquanto a IA pensa
+        showTyping(waNumber);
 
         // v11: lead de prospecção? → a IA troca de persona (vende o Mais Automação)
         const isProspect = (await query(
@@ -441,23 +535,30 @@ async function waWebhook(req, res) {
 
         // v13.6.2: usa o texto final da mensagem (texto digitado OU transcrição
         // de áudio — antes ia msg.text, que é vazio em áudio transcrito).
-        let intent = await ai.classifyIntent(body);
+        const recent = (await query(
+          `SELECT direction, body FROM messages WHERE conversation_id = $1 ORDER BY created_at DESC LIMIT 10`,
+          [conversation.id])).rows.reverse();
+
+        // v13.9.4: LLMs em PARALELO (Promise.all) — intenção e resposta num
+        // round-trip só (antes: fila, 2 esperas seguidas = o dobro do tempo).
+        const t0 = Date.now();
+        const [intentRaw, suggestion] = await Promise.all([
+          ai.classifyIntent(body),
+          ai.suggestReply(recent, {
+            name: contact.name, company: contact.company, is_prospect: isProspect,
+          }),
+        ]);
+        let intent = intentRaw;
         if (ai.detectEscalation(body)) {
           intent = 'escalacao'; // vence a classificação leve — humano precisa saber
           console.log('[escalacao] 🚨 conversa pede humano — intent marcada no painel:', waNumber);
         }
         await query(`UPDATE thread_state SET intent = $2, updated_at = now() WHERE conversation_id = $1`,
           [conversation.id, intent]);
-        const recent = (await query(
-          `SELECT direction, body FROM messages WHERE conversation_id = $1 ORDER BY created_at DESC LIMIT 10`,
-          [conversation.id])).rows.reverse();
-        const suggestion = await ai.suggestReply(recent, {
-          name: contact.name, company: contact.company, is_prospect: isProspect,
-        });
         await query(
           `UPDATE thread_state SET next_suggestion = $2, updated_at = now() WHERE conversation_id = $1`,
           [conversation.id, suggestion]);
-        console.log('[ia] sugestão pronta p/ conversa', conversation.id,
+        console.log(`[ia] intenção + resposta prontas em ${Date.now() - t0} ms p/ conversa`, conversation.id,
           isProspect ? '(persona: vendas Mais Automação)' : '(persona: atendente do negócio)');
 
         // v13.2: AGENDA REAL — se a intenção é agendamento, extrai data/hora e grava
@@ -472,7 +573,7 @@ async function waWebhook(req, res) {
                  VALUES ($1,$2,$3) ON CONFLICT DO NOTHING RETURNING id`,
                 [conversation.id, appt.service, slot.toISOString()]);
               if (ins.rowCount > 0) {
-                const conf = `📅 Agendado! ${appt.service ? appt.service + ' — ' : ''}${appt.date.split('-').reverse().join('/')} às ${appt.time} (horário de Aracaju). Te mando um lembrete antes, e qualquer ajuste é só me chamar 💜`;
+                const conf = `📅 Agendado! ${appt.service ? appt.service + ' — ' : ''}${appt.date.split('-').reverse().join('/')} às ${appt.time} (horário de Aracaju). Te mando um lembrete antes, e qualquer ajuste é só me chamar`;
                 await query(`INSERT INTO messages (conversation_id, direction, kind, body)
                              VALUES ($1,'out','text',$2)`, [conversation.id, conf]);
                 await query(`UPDATE thread_state SET next_suggestion = NULL WHERE conversation_id = $1`,
@@ -514,7 +615,7 @@ async function waWebhook(req, res) {
                    VALUES ($1,'out','text',$2,$3)`,
                   [conversation.id, suggestion, sent?.id ? String(sent.id) : (sent?.key?.id ? String(sent.key.id) : null)]
                 );
-                await query(`UPDATE conversations SET last_msg_at = now() WHERE id = $1`, [conversation.id]);
+                await query(`UPDATE conversations SET last_msg_at = now() WHERE id = $1`, [conversation_id]);
                 await query(`UPDATE thread_state SET next_suggestion = NULL WHERE conversation_id = $1`,
                   [conversation.id]);
                 console.log('[auto] ✅ resposta enviada automaticamente p/ conversa', conversation.id);
@@ -595,7 +696,7 @@ setInterval(async () => {
   } catch (e) { console.error('[lembrete] erro no worker:', e.message); }
 }, 5 * 60 * 1000);
 
-console.log(`[boot] NEON CRM v13.9.3 no ar | provider=${PROVIDER} | AUTO_RESPOND=${process.env.AUTO_RESPOND || '(NÃO definido!)'} | login_painel=${PANEL_USER && PANEL_PASS ? 'ATIVO' : 'desativado'} | janela_IA=${AI_WINDOW[0]}h-${AI_WINDOW[1]}h | opt-out: LIGADO (palavras-chave) | escalação: LIGADA | agenda+lembretes+áudio+métricas: LIGADOS`);
+console.log(`[boot] NEON CRM v13.9.4 no ar | provider=${PROVIDER} | AUTO_RESPOND=${process.env.AUTO_RESPOND || '(NÃO definido!)'} | login_painel=${PANEL_USER && PANEL_PASS ? 'ATIVO' : 'desativado'} | janela_IA=${AI_WINDOW[0]}h-${AI_WINDOW[1]}h | opt-out: LIGADO (palavras-chave) | escalação: LIGADA | IA paralela + digitando... + tradutor + embaixador: LIGADOS`);
 app.listen(PORT, () => console.log(`NEON CRM no ar em ${process.env.APP_URL || 'http://localhost:' + PORT}`));
 
 process.on('SIGTERM', () => { pool.end().then(() => process.exit(0)); });
