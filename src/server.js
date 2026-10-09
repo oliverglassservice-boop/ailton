@@ -1,5 +1,5 @@
 /**
- * NEON CRM — servidor v13.9.4 (multi-provedor WhatsApp: Evolution API | Uazapi).
+ * NEON CRM — servidor v13.10 (multi-provedor WhatsApp: Evolution API | Uazapi).
  * Núcleo: contatos, deals, inbox WhatsApp, AI Gateway (OpenAI),
  * Prospecção Ativa (Google Places + disparo com guardrails).
  * v11: login no painel (Basic Auth) + persona de vendas + guarda de horário.
@@ -51,6 +51,10 @@
  *       (ElevenLabs) + notas ✅; 5) GUARD: "sair do tradutor/embaixador"
  *       NUNCA marca opt-out LGPD (bug real de 07/10); 6) 💜 removidos
  *       das mensagens fixas (regra do dono — vale também para sistema).
+ * v13.10: WHITE-LABEL NO PAINEL — nome do negócio, nome da atendente,
+ *       cores (primária, sidebar, fundo), mensagem de boas-vindas e
+ *       persona extra da IA, tudo editável na aba Configurações e
+ *       guardado na tabela app_settings (GET/POST /api/branding).
  */
 import express from 'express';
 import path from 'path';
@@ -72,6 +76,18 @@ const wa = PROVIDER === 'evolution' ? evolution : uazapi;
 // o fluxo nem loga erro: se o provedor não tiver sendTyping, não faz nada.
 function showTyping(to) {
   try { Promise.resolve(wa.sendTyping?.(to)).catch(() => {}); } catch (_) {}
+}
+
+// v13.10: WHITE-LABEL — nome do negócio, atendente, cores, boas-vindas e
+// persona editáveis NO PAINEL (tabela app_settings). A IA e o painel leem
+// daqui; sem registro no banco, tudo segue o padrão do código.
+const BRAND_KEYS = ['business_name', 'attendant_name', 'welcome_msg',
+  'persona_extra', 'brand_ai', 'brand_ai_deep', 'brand_side', 'brand_side2', 'brand_bg'];
+async function loadBranding() {
+  try {
+    const r = await query(`SELECT key, value FROM app_settings`);
+    return Object.fromEntries(r.rows.map((x) => [x.key, x.value]));
+  } catch (_) { return {}; } // tabela ainda ausente — usa o padrão do código
 }
 
 const app = express();
@@ -174,6 +190,26 @@ app.get('/api/metrics', async (_req, res) => {
   } catch (e) { res.status(500).json({ error: String(e.message) }); }
 });
 
+/* ---------------- API: white-label (v13.10) — marca editável no painel ---------------- */
+app.get('/api/branding', async (_req, res) => {
+  res.json(await loadBranding());
+});
+app.post('/api/branding', async (req, res) => {
+  try {
+    const body = req.body || {};
+    for (const k of BRAND_KEYS) {
+      if (body[k] === undefined) continue;
+      await query(
+        `INSERT INTO app_settings (key, value) VALUES ($1,$2)
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+        [k, String(body[k]).slice(0, 4000)]
+      );
+    }
+    console.log('[branding] ✅ marca atualizada pelo painel');
+    res.json({ ok: true, branding: await loadBranding() });
+  } catch (e) { res.status(500).json({ error: String(e.message) }); }
+});
+
 /* ---------------- API: contatos ---------------- */
 app.get('/api/contacts', async (_req, res) => {
   const r = await query(`SELECT * FROM contacts ORDER BY score DESC, name`);
@@ -258,7 +294,7 @@ app.post('/api/threads/:id/suggest', async (req, res) => {
     `SELECT ct.name, ct.company, ct.score, ct.status FROM conversations cv
      JOIN contacts ct ON ct.id = cv.contact_id WHERE cv.id = $1`, [id]
   )).rows[0] || {};
-  const suggestion = await ai.suggestReply(msgs, ctx);
+  const suggestion = await ai.suggestReply(msgs, { ...ctx, branding: await loadBranding() });
   await query(
     `UPDATE thread_state SET next_suggestion = $2, updated_at = now() WHERE conversation_id = $1`,
     [id, suggestion]
@@ -546,6 +582,7 @@ async function waWebhook(req, res) {
           ai.classifyIntent(body),
           ai.suggestReply(recent, {
             name: contact.name, company: contact.company, is_prospect: isProspect,
+            branding: await loadBranding(),
           }),
         ]);
         let intent = intentRaw;
@@ -660,6 +697,9 @@ app.use(express.static(path.join(__dirname, '..', 'public'), {
 
 const PORT = process.env.PORT || 3000;
 await migrate();
+// v13.10: tabela da marca (white-label) — criada cedo; nunca derruba o boot
+try { await query(`CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`); }
+catch (e) { console.error('[branding] tabela app_settings:', e.message); }
 
 /* ---------------- FASE 4: lembretes automáticos (D-1 e 2h antes) ---------------- */
 const REMINDER_D1 = 'Oi! Passando para lembrar do seu horário amanhã 📅 Qualquer imprevisto, me avisa por aqui, tá?';
@@ -696,7 +736,7 @@ setInterval(async () => {
   } catch (e) { console.error('[lembrete] erro no worker:', e.message); }
 }, 5 * 60 * 1000);
 
-console.log(`[boot] NEON CRM v13.9.4 no ar | provider=${PROVIDER} | AUTO_RESPOND=${process.env.AUTO_RESPOND || '(NÃO definido!)'} | login_painel=${PANEL_USER && PANEL_PASS ? 'ATIVO' : 'desativado'} | janela_IA=${AI_WINDOW[0]}h-${AI_WINDOW[1]}h | opt-out: LIGADO (palavras-chave) | escalação: LIGADA | IA paralela + digitando... + tradutor + embaixador: LIGADOS`);
+console.log(`[boot] NEON CRM v13.10 no ar | provider=${PROVIDER} | AUTO_RESPOND=${process.env.AUTO_RESPOND || '(NÃO definido!)'} | login_painel=${PANEL_USER && PANEL_PASS ? 'ATIVO' : 'desativado'} | janela_IA=${AI_WINDOW[0]}h-${AI_WINDOW[1]}h | opt-out: LIGADO (palavras-chave) | escalação: LIGADA | IA paralela + digitando... + tradutor + embaixador: LIGADOS`);
 app.listen(PORT, () => console.log(`NEON CRM no ar em ${process.env.APP_URL || 'http://localhost:' + PORT}`));
 
 process.on('SIGTERM', () => { pool.end().then(() => process.exit(0)); });
